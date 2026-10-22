@@ -20,10 +20,10 @@ public struct CameraViewfinder: View {
             VStack(spacing: 0) {
                 // Top Minimal Status Bar
                 HStack {
-                    Text("LIVE GRADED")
+                    Text("OPAL")
                         .font(.system(size: 11, weight: .black))
-                        .tracking(2)
-                        .foregroundColor(.white.opacity(0.8))
+                        .tracking(3)
+                        .foregroundColor(.white.opacity(0.85))
 
                     Spacer()
 

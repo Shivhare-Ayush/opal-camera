@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
-    <string>com.ayush.livegraded</string>
+    <string>dev.ayush.opal</string>
     <key>CFBundleName</key>
-    <string>LiveGraded</string>
+    <string>Opal</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -15,11 +15,11 @@
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>NSCameraUsageDescription</key>
-    <string>LiveGraded needs camera access to display real-time color graded viewfinder previews.</string>
+    <string>Opal needs camera access to display real-time color graded viewfinder previews.</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
-    <string>LiveGraded needs photo library access to save finished graded photos to the 'LiveGraded Photos' album.</string>
+    <string>Opal needs photo library access to save finished graded photos to the 'LiveGraded Photos' album.</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>LiveGraded needs photo library access to manage the dedicated test album and save your photos.</string>
+    <string>Opal needs photo library access to manage the dedicated test album and save your photos.</string>
     <key>UILaunchScreen</key>
     <dict/>
     <key>UIRequiredDeviceCapabilities</key>
