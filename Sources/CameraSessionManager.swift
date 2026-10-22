@@ -1,0 +1,168 @@
+import AVFoundation
+import CoreImage
+import SwiftUI
+import MetalKit
+
+@MainActor
+public final class CameraSessionManager: NSObject, ObservableObject {
+    public static let shared = CameraSessionManager()
+
+    // Published State
+    @Published public var activePreset: LookPreset = .cleanPunch // Default Option A
+    @Published public var isSessionRunning: Bool = false
+    @Published public var isCapturing: Bool = false
+    @Published public var lastCapturedThumbnail: UIImage?
+
+    // AVFoundation Session
+    public let captureSession = AVCaptureSession()
+    private let videoOutput = AVCaptureVideoDataOutput()
+    private let photoOutput = AVCapturePhotoOutput()
+    private let sessionQueue = DispatchQueue(label: "livegraded.camera.sessionQueue")
+
+    // Metal & Core Image Rendering
+    public var metalDevice: MTLDevice?
+    public var ciContext: CIContext?
+    public var currentDrawablePixelBuffer: CVPixelBuffer?
+    public var onFrameProcessed: ((CIImage) -> Void)?
+
+    private override init() {
+        super.init()
+        setupMetal()
+    }
+
+    private func setupMetal() {
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
+        self.metalDevice = device
+        self.ciContext = CIContext(mtlDevice: device, options: [
+            .workingColorSpace: CGColorSpace(name: CGColorSpace.extendedSRGB)!,
+            .cacheIntermediates: false
+        ])
+    }
+
+    // MARK: - Session Configuration
+
+    public func checkCameraPermissions() async -> Bool {
+        let status = AVCaptureDevice.authorizationStatus(for: .video)
+        switch status {
+        case .authorized:
+            return true
+        case .notDetermined:
+            return await AVCaptureDevice.requestAccess(for: .video)
+        default:
+            return false
+        }
+    }
+
+    public func configureSession() {
+        sessionQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.captureSession.beginConfiguration()
+            self.captureSession.sessionPreset = .photo
+
+            // Setup Camera Input
+            guard let videoDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+                  let videoInput = try? AVCaptureDeviceInput(device: videoDevice),
+                  self.captureSession.canAddInput(videoInput) else {
+                self.captureSession.commitConfiguration()
+                return
+            }
+            self.captureSession.addInput(videoInput)
+
+            // Setup 60fps Video Data Output for Live Graded Viewfinder
+            if self.captureSession.canAddOutput(self.videoOutput) {
+                self.videoOutput.alwaysDiscardsLateVideoFrames = true
+                self.videoOutput.videoSettings = [
+                    kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)
+                ]
+                self.videoOutput.setSampleBufferDelegate(self, queue: DispatchQueue(label: "livegraded.camera.videoQueue", qos: .userInteractive))
+                self.captureSession.addOutput(self.videoOutput)
+            }
+
+            // Setup Photo Capture Output
+            if self.captureSession.canAddOutput(self.photoOutput) {
+                self.photoOutput.isHighResolutionCaptureEnabled = true
+                self.photoOutput.maxPhotoQualityPrioritization = .balanced
+                self.captureSession.addOutput(self.photoOutput)
+            }
+
+            self.captureSession.commitConfiguration()
+            self.captureSession.startRunning()
+
+            DispatchQueue.main.async {
+                self.isSessionRunning = self.captureSession.isRunning
+            }
+        }
+    }
+
+    // MARK: - Shutter Capture
+
+    public func capturePhoto() {
+        guard !isCapturing else { return }
+        isCapturing = true
+
+        let settings = AVCapturePhotoSettings(format: [kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)])
+        settings.isHighResolutionPhotoEnabled = true
+        settings.photoQualityPrioritization = .balanced
+
+        photoOutput.capturePhoto(with: settings, delegate: self)
+    }
+}
+
+// MARK: - AVCaptureVideoDataOutputSampleBufferDelegate
+
+extension CameraSessionManager: AVCaptureVideoDataOutputSampleBufferDelegate {
+    public func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+
+        // Orientation Fix
+        if connection.isVideoOrientationSupported {
+            connection.videoOrientation = .portrait
+        }
+
+        let inputImage = CIImage(cvPixelBuffer: pixelBuffer)
+
+        // Apply pre-baked active CIColorCube LUT
+        let filter = LUTPresets.shared.filter(for: activePreset)
+        filter.setValue(inputImage, forKey: kCIInputImageKey)
+
+        if let outputImage = filter.outputImage {
+            DispatchQueue.main.async { [weak self] in
+                self?.onFrameProcessed?(outputImage)
+            }
+        }
+    }
+}
+
+// MARK: - AVCapturePhotoCaptureDelegate
+
+extension CameraSessionManager: AVCapturePhotoCaptureDelegate {
+    public func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+        defer {
+            DispatchQueue.main.async {
+                self.isCapturing = false
+            }
+        }
+
+        guard error == nil, let pixelBuffer = photo.pixelBuffer else { return }
+
+        let rawImage = CIImage(cvPixelBuffer: pixelBuffer)
+        let filter = LUTPresets.shared.filter(for: activePreset)
+        filter.setValue(rawImage, forKey: kCIInputImageKey)
+
+        guard let outputCI = filter.outputImage,
+              let cgImage = ciContext?.createCGImage(outputCI, from: outputCI.extent) else { return }
+
+        let gradedUIImage = UIImage(cgImage: cgImage)
+        let rawData = photo.fileDataRepresentation()
+
+        // Save to dedicated "LiveGraded Photos" album
+        AlbumManager.shared.save(gradedImage: gradedUIImage, rawData: rawData) { [weak self] result in
+            DispatchQueue.main.async {
+                if case .success = result {
+                    self?.lastCapturedThumbnail = gradedUIImage
+                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                }
+            }
+        }
+    }
+}

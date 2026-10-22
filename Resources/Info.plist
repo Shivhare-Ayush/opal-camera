@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.ayush.livegraded</string>
+    <key>CFBundleName</key>
+    <string>LiveGraded</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+    <key>NSCameraUsageDescription</key>
+    <string>LiveGraded needs camera access to display real-time color graded viewfinder previews.</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>LiveGraded needs photo library access to save finished graded photos to the 'LiveGraded Photos' album.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>LiveGraded needs photo library access to manage the dedicated test album and save your photos.</string>
+    <key>UILaunchScreen</key>
+    <dict/>
+    <key>UIRequiredDeviceCapabilities</key>
+    <array>
+        <string>arm64</string>
+        <string>metal</string>
+    </array>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+    </array>
+</dict>
+</plist>
