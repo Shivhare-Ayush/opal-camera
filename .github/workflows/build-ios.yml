@@ -1,0 +1,61 @@
+name: Build Bask iOS App (Sideloadable IPA)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-ipa:
+    name: Build Sideloadable IPA
+    runs-on: macos-15
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Xcode
+        run: |
+          sudo xcodebuild -runFirstLaunch
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: |
+          brew install xcodegen
+
+      - name: Generate Xcode Project with XcodeGen
+        env:
+          BASK_BUNDLE: "dev.ayush.bask"
+          BASK_TEAM: "0000000000"
+        run: |
+          xcodegen generate
+
+      - name: Build iOS App Target
+        run: |
+          xcodebuild -project Bask.xcodeproj \
+            -target Bask \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            SYMROOT="$PWD/build/sym" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES \
+            ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS=NO \
+            ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS=NO \
+            build
+
+      - name: Package Payload as Sideloadable IPA
+        run: |
+          mkdir -p Payload
+          cp -R build/sym/Release-iphoneos/Bask.app Payload/
+          echo "Verifying App Bundle:"
+          ls -lh Payload/Bask.app/
+          zip -qr Bask.ipa Payload
+          ls -lh Bask.ipa
+
+      - name: Upload Bask IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bask-iOS-IPA
+          path: Bask.ipa
+          retention-days: 7

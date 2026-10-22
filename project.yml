@@ -1,0 +1,40 @@
+name: Bask
+options:
+  bundleIdPrefix: dev.ayush
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: "${BASK_TEAM}"
+    CODE_SIGN_STYLE: Automatic
+    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    ENABLE_PREVIEWS: "NO"
+    ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: "NO"
+    ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS: "NO"
+targets:
+  Bask:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+      - Resources
+    info:
+      path: Resources/Info.plist
+      properties:
+        CFBundleDisplayName: Bask
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIUserInterfaceStyle: Dark
+        NSCameraUsageDescription: Bask needs camera access to display real-time color graded viewfinder previews.
+        NSPhotoLibraryAddUsageDescription: Bask needs photo library access to save finished graded photos to the LiveGraded Photos album.
+        NSPhotoLibraryUsageDescription: Bask needs photo library access to manage the dedicated test album and save your photos.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ${BASK_BUNDLE:-dev.ayush.bask}
+        TARGETED_DEVICE_FAMILY: "1"
