@@ -48,7 +48,9 @@ jobs:
         run: |
           mkdir -p Payload
           cp -R build/sym/Release-iphoneos/*.app Payload/
-          echo "Verifying App Bundle:"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier dev.ayush.opal" Payload/Opal.app/Info.plist 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string dev.ayush.opal" Payload/Opal.app/Info.plist
+          echo "Verifying App Bundle & CFBundleIdentifier:"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" Payload/Opal.app/Info.plist
           ls -lh Payload/
           zip -qr Opal.ipa Payload
           ls -lh Opal.ipa
