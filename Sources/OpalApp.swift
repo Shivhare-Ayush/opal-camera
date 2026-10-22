@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct LiveGradedApp: App {
+struct OpalApp: App {
     var body: some Scene {
         WindowGroup {
             CameraViewfinder()

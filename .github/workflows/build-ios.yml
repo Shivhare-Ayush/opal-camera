@@ -47,9 +47,9 @@ jobs:
       - name: Package Payload as Sideloadable IPA
         run: |
           mkdir -p Payload
-          cp -R build/sym/Release-iphoneos/Opal.app Payload/
+          cp -R build/sym/Release-iphoneos/*.app Payload/
           echo "Verifying App Bundle:"
-          ls -lh Payload/Opal.app/
+          ls -lh Payload/
           zip -qr Opal.ipa Payload
           ls -lh Opal.ipa
 

@@ -42,7 +42,7 @@ final class AlbumManager: ObservableObject {
         }
 
         return try await withCheckedThrowingContinuation { continuation in
-            PHPhotoLibrary.performChanges({
+            PHPhotoLibrary.shared().performChanges({
                 let _ = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: "LiveGraded Photos")
             }) { success, error in
                 if let error = error {
@@ -75,12 +75,12 @@ final class AlbumManager: ObservableObject {
 
                 PHPhotoLibrary.shared().performChanges({
                     let collectionChangeRequest = PHAssetCollectionChangeRequest(for: collection)
-                    collectionChangeRequest?.addAssets([gradedPlaceholder])
+                    collectionChangeRequest?.addAssets([gradedPlaceholder] as NSArray)
 
                     if let rawData = rawData, let rawImage = UIImage(data: rawData) {
                         let rawChangeRequest = PHAssetChangeRequest.creationRequestForAsset(from: rawImage)
                         guard let rawPlaceholder = rawChangeRequest.placeholderForCreatedAsset else { return }
-                        collectionChangeRequest?.addAssets([rawPlaceholder])
+                        collectionChangeRequest?.addAssets([rawPlaceholder] as NSArray)
                     }
                 }) { saved, error in
                     if let error = error {
