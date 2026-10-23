@@ -3,101 +3,128 @@ import SwiftUI
 public struct FlywheelView: View {
     @Binding public var activePreset: LookPreset
     @Binding public var isPresented: Bool
+    public var spawnPosition: CGPoint?
+    @Binding public var hoveredPreset: LookPreset?
 
     // Flywheel Geometry
     private let wedgeCount = 6
     private let innerRadius: CGFloat = 45
-    private let outerRadius: CGFloat = 135
+    public static let outerRadius: CGFloat = 135
 
-    @State private var dragAngle: Double = 0
-    @State private var currentHoveredPreset: LookPreset?
+    @State private var internalHoveredPreset: LookPreset?
     @State private var lastHapticIndex: Int = -1
 
     private let hapticFeedback = UIImpactFeedbackGenerator(style: .medium)
 
-    public init(activePreset: Binding<LookPreset>, isPresented: Binding<Bool>) {
+    public init(
+        activePreset: Binding<LookPreset>,
+        isPresented: Binding<Bool>,
+        spawnPosition: CGPoint? = nil,
+        hoveredPreset: Binding<LookPreset?>? = nil
+    ) {
         self._activePreset = activePreset
         self._isPresented = isPresented
+        self.spawnPosition = spawnPosition
+        self._hoveredPreset = hoveredPreset ?? .constant(nil)
+    }
+
+    /// Computes clamped center so the 135pt radial wheel never clips screen edges.
+    public static func clampedCenter(spawnPosition: CGPoint?, in size: CGSize) -> CGPoint {
+        let defaultCenter = CGPoint(x: size.width / 2, y: size.height / 2)
+        let rawCenter = spawnPosition ?? defaultCenter
+        let clampedX = min(max(rawCenter.x, outerRadius + 16), size.width - outerRadius - 16)
+        let clampedY = min(max(rawCenter.y, outerRadius + 70), size.height - outerRadius - 90)
+        return CGPoint(x: clampedX, y: clampedY)
+    }
+
+    private var currentHovered: LookPreset {
+        hoveredPreset ?? internalHoveredPreset ?? activePreset
     }
 
     public var body: some View {
-        ZStack {
-            // Dimmed Viewfinder Backdrop
-            Color.black.opacity(0.35)
-                .ignoresSafeArea()
-                .onTapGesture {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                        isPresented = false
-                    }
-                }
+        GeometryReader { screenGeo in
+            let center = Self.clampedCenter(spawnPosition: spawnPosition, in: screenGeo.size)
 
-            // Radial Flywheel
             ZStack {
-                // Central Ring Hub
-                Circle()
-                    .fill(.ultraThinMaterial)
-                    .frame(width: innerRadius * 2, height: innerRadius * 2)
-                    .overlay(
-                        VStack(spacing: 2) {
-                            Image(systemName: "camera.filters")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(currentHoveredPreset?.accentColor ?? activePreset.accentColor)
-                            Text((currentHoveredPreset ?? activePreset).displayName)
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundColor(.white)
-                                .lineLimit(1)
-                        }
-                    )
+                // Dimmed Viewfinder Backdrop
+                Color.black.opacity(0.35)
+                    .ignoresSafeArea()
                     .onTapGesture {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                             isPresented = false
                         }
                     }
 
-                // 6 Radial Wedges
-                ForEach(LookPreset.allCases) { preset in
-                    WedgeShape(
-                        index: preset.id,
-                        totalCount: wedgeCount,
-                        innerRadius: innerRadius,
-                        outerRadius: isHovered(preset) ? outerRadius + 12 : outerRadius
-                    )
-                    .fill(
-                        isHovered(preset)
-                            ? preset.accentColor.opacity(0.85)
-                            : (preset == activePreset ? preset.accentColor.opacity(0.4) : Color.white.opacity(0.18))
-                    )
-                    .overlay(
+                // Radial Flywheel centered at clamped touch position
+                ZStack {
+                    // Central Ring Hub
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .frame(width: innerRadius * 2, height: innerRadius * 2)
+                        .overlay(
+                            VStack(spacing: 2) {
+                                Image(systemName: "camera.filters")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(currentHovered.accentColor)
+                                Text(currentHovered.displayName)
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+                            }
+                        )
+                        .onTapGesture {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                isPresented = false
+                            }
+                        }
+
+                    // 6 Radial Wedges
+                    ForEach(LookPreset.allCases) { preset in
                         WedgeShape(
                             index: preset.id,
                             totalCount: wedgeCount,
                             innerRadius: innerRadius,
                             outerRadius: isHovered(preset) ? outerRadius + 12 : outerRadius
                         )
-                        .stroke(Color.white.opacity(isHovered(preset) ? 0.9 : 0.25), lineWidth: 1.5)
-                    )
-                    .overlay(
-                        WedgeLabel(
-                            preset: preset,
-                            index: preset.id,
-                            totalCount: wedgeCount,
-                            radius: (innerRadius + outerRadius) / 2
+                        .fill(
+                            isHovered(preset)
+                                ? preset.accentColor.opacity(0.85)
+                                : (preset == activePreset ? preset.accentColor.opacity(0.4) : Color.white.opacity(0.18))
                         )
-                    )
-                    .onTapGesture {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                            activePreset = preset
-                            isPresented = false
+                        .overlay(
+                            WedgeShape(
+                                index: preset.id,
+                                totalCount: wedgeCount,
+                                innerRadius: innerRadius,
+                                outerRadius: isHovered(preset) ? outerRadius + 12 : outerRadius
+                            )
+                            .stroke(Color.white.opacity(isHovered(preset) ? 0.9 : 0.25), lineWidth: 1.5)
+                        )
+                        .overlay(
+                            WedgeLabel(
+                                preset: preset,
+                                index: preset.id,
+                                totalCount: wedgeCount,
+                                radius: (innerRadius + outerRadius) / 2
+                            )
+                        )
+                        .onTapGesture {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                                activePreset = preset
+                                isPresented = false
+                            }
+                            UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
                         }
-                        UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
                     }
                 }
+                .frame(width: outerRadius * 2.4, height: outerRadius * 2.4)
+                .position(center)
             }
-            .frame(width: outerRadius * 2.4, height: outerRadius * 2.4)
+            // Screen-wide drag handler tracking relative to the dynamic center
             .gesture(
-                DragGesture(minimumDistance: 10)
+                DragGesture(minimumDistance: 0, coordinateSpace: .global)
                     .onChanged { value in
-                        handleDrag(location: value.location)
+                        handleDrag(location: value.location, center: center)
                     }
                     .onEnded { _ in
                         handleRelease()
@@ -106,56 +133,36 @@ public struct FlywheelView: View {
         }
         .onAppear {
             hapticFeedback.prepare()
-            currentHoveredPreset = activePreset
+            internalHoveredPreset = activePreset
         }
     }
 
     // MARK: - Gesture Math
 
-    private func handleDrag(location: CGPoint) {
-        let center = CGPoint(x: outerRadius * 1.2, y: outerRadius * 1.2)
-        let dx = location.x - center.x
-        let dy = location.y - center.y
-        let distance = sqrt(dx * dx + dy * dy)
-
-        guard distance > (innerRadius * 0.6) else { return }
-
-        // Calculate Angle in Degrees (0 to 360)
-        var angle = atan2(dy, dx) * 180 / .pi
-        if angle < 0 { angle += 360 }
-
-        // 6 Wedges: 60 degrees each.
-        // In screen coordinates: North is 270 degrees.
-        // Adding 90 degrees rotates coordinates so North (270°) maps to 0° (Clean Punch).
-        let sliceAngle: Double = 360.0 / Double(wedgeCount)
-        let normalizedAngle = (angle + 90.0).truncatingRemainder(dividingBy: 360.0)
-        let adjustedAngle = (normalizedAngle + (sliceAngle / 2.0)).truncatingRemainder(dividingBy: 360.0)
-        let index = Int(adjustedAngle / sliceAngle) % wedgeCount
-
-        if let newPreset = LookPreset(rawValue: index) {
-            if currentHoveredPreset != newPreset {
-                currentHoveredPreset = newPreset
-                // Trigger tactile haptic on wedge snap
-                if lastHapticIndex != index {
+    private func handleDrag(location: CGPoint, center: CGPoint) {
+        if let newPreset = LookPreset.preset(at: location, relativeTo: center, innerDeadZone: innerRadius * 0.5) {
+            if currentHovered != newPreset {
+                internalHoveredPreset = newPreset
+                hoveredPreset = newPreset
+                if lastHapticIndex != newPreset.id {
                     hapticFeedback.impactOccurred()
-                    lastHapticIndex = index
+                    lastHapticIndex = newPreset.id
                 }
             }
         }
     }
 
     private func handleRelease() {
-        if let selected = currentHoveredPreset {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                activePreset = selected
-                isPresented = false
-            }
-            UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+        let selected = currentHovered
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+            activePreset = selected
+            isPresented = false
         }
+        UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
     }
 
     private func isHovered(_ preset: LookPreset) -> Bool {
-        return (currentHoveredPreset ?? activePreset) == preset
+        return currentHovered == preset
     }
 }
 

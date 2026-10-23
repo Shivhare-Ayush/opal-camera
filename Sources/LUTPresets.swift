@@ -46,6 +46,26 @@ public enum LookPreset: Int, CaseIterable, Identifiable, Sendable {
         case .midnightCity: return .cyan
         }
     }
+
+    /// Evaluates which radial wedge is hovered based on touch location relative to center.
+    /// Maps North (270° in iOS screen coordinates) directly to Clean Punch (index 0).
+    public static func preset(at location: CGPoint, relativeTo center: CGPoint, innerDeadZone: CGFloat = 22) -> LookPreset? {
+        let dx = location.x - center.x
+        let dy = location.y - center.y
+        let distance = sqrt(dx * dx + dy * dy)
+        guard distance > innerDeadZone else { return nil }
+
+        var angle = atan2(dy, dx) * 180 / .pi
+        if angle < 0 { angle += 360 }
+
+        let wedgeCount = 6
+        let sliceAngle: Double = 360.0 / Double(wedgeCount)
+        let normalizedAngle = (angle + 90.0).truncatingRemainder(dividingBy: 360.0)
+        let adjustedAngle = (normalizedAngle + (sliceAngle / 2.0)).truncatingRemainder(dividingBy: 360.0)
+        let index = Int(adjustedAngle / sliceAngle) % wedgeCount
+
+        return LookPreset(rawValue: index)
+    }
 }
 
 // MARK: - Thread-Safe 3D Color Cube Filter Cache & Generator

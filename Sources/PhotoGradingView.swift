@@ -8,6 +8,8 @@ struct PhotoGradingView: View {
     @ObservedObject var camera: CameraSessionManager
     @ObservedObject var albumManager: AlbumManager
     @Binding var showFlywheel: Bool
+    @Binding var flywheelSpawnPoint: CGPoint?
+    @Binding var flywheelHoveredPreset: LookPreset?
 
     @State private var selectedItem: PhotosPickerItem?
     @State private var previewImage: UIImage?
@@ -19,11 +21,21 @@ struct PhotoGradingView: View {
     @State private var showSaveSuccess: Bool = false
     @State private var saveSuccessMessage: String = ""
     @State private var gradingTask: Task<Void, Never>?
+    @State private var holdTask: Task<Void, Never>?
+    @State private var isHoldGestureActive: Bool = false
 
-    init(camera: CameraSessionManager, albumManager: AlbumManager, showFlywheel: Binding<Bool>) {
+    init(
+        camera: CameraSessionManager,
+        albumManager: AlbumManager,
+        showFlywheel: Binding<Bool>,
+        flywheelSpawnPoint: Binding<CGPoint?>,
+        flywheelHoveredPreset: Binding<LookPreset?>
+    ) {
         self.camera = camera
         self.albumManager = albumManager
         self._showFlywheel = showFlywheel
+        self._flywheelSpawnPoint = flywheelSpawnPoint
+        self._flywheelHoveredPreset = flywheelHoveredPreset
     }
 
     var body: some View {
@@ -41,17 +53,14 @@ struct PhotoGradingView: View {
                                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                                     .stroke(Color.white.opacity(0.15), lineWidth: 1)
                             )
-                            // Hold to Compare Original gesture
+                            // Hold-and-drag to spawn Flywheel anywhere on the photo canvas
                             .gesture(
-                                DragGesture(minimumDistance: 0)
-                                    .onChanged { _ in
-                                        if !isComparingOriginal && previewImage != nil {
-                                            isComparingOriginal = true
-                                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                        }
+                                DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                                    .onChanged { value in
+                                        handlePhotoDragChanged(value: value)
                                     }
-                                    .onEnded { _ in
-                                        isComparingOriginal = false
+                                    .onEnded { value in
+                                        handlePhotoDragEnded(value: value)
                                     }
                             )
 
@@ -83,9 +92,9 @@ struct PhotoGradingView: View {
                             }
                             Spacer()
 
-                            // Hint: Press & Hold to peek original
+                            // Hint: Hold & drag to choose looks, or tap Eye to compare
                             if previewImage != nil && !isComparingOriginal {
-                                Text("Hold photo to compare original")
+                                Text("Hold & drag anywhere for look wheel")
                                     .font(.system(size: 12, weight: .medium))
                                     .foregroundColor(.white.opacity(0.6))
                                     .padding(.horizontal, 14)
@@ -167,6 +176,8 @@ struct PhotoGradingView: View {
                 // Look Switcher Pill (Clear, generous, centered tap target)
                 Button(action: {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                        flywheelSpawnPoint = nil
+                        flywheelHoveredPreset = camera.activePreset
                         showFlywheel.toggle()
                     }
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -194,7 +205,7 @@ struct PhotoGradingView: View {
                 }
                 .buttonStyle(.plain)
 
-                // Action Row: Photos Picker | Save Button | Balance Spacer
+                // Action Row: Photos Picker | Save Button | Compare Original Eye Button
                 HStack {
                     // Photos Picker Trigger
                     PhotosPicker(selection: $selectedItem, matching: .images) {
@@ -242,8 +253,34 @@ struct PhotoGradingView: View {
 
                     Spacer()
 
-                    // Empty placeholder to balance layout
-                    Color.clear.frame(width: 52, height: 52)
+                    // Compare / Peek Original Button (Press & hold to see original)
+                    Button(action: {}) {
+                        ZStack {
+                            Circle()
+                                .fill(isComparingOriginal ? Color.white : Color.white.opacity(0.18))
+                                .frame(width: 52, height: 52)
+                            Image(systemName: isComparingOriginal ? "eye.slash.fill" : "eye.fill")
+                                .font(.system(size: 20))
+                                .foregroundColor(isComparingOriginal ? .black : .white)
+                        }
+                        .frame(width: 52, height: 52)
+                        .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(previewImage == nil)
+                    .opacity(previewImage == nil ? 0.3 : 1.0)
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { _ in
+                                if !isComparingOriginal && previewImage != nil {
+                                    isComparingOriginal = true
+                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                }
+                            }
+                            .onEnded { _ in
+                                isComparingOriginal = false
+                            }
+                    )
                 }
                 .padding(.horizontal, 28)
                 .padding(.bottom, 22)
@@ -422,6 +459,72 @@ struct PhotoGradingView: View {
 
             PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, _ in
                 continuation.resume(returning: data)
+            }
+        }
+    }
+
+    // MARK: - Hold-and-Drag Flywheel Gestures
+
+    private func handlePhotoDragChanged(value: DragGesture.Value) {
+        let distance = hypot(value.translation.width, value.translation.height)
+
+        if !isHoldGestureActive {
+            isHoldGestureActive = true
+            flywheelSpawnPoint = value.startLocation
+            flywheelHoveredPreset = camera.activePreset
+
+            // 160ms hold timer for static finger press
+            holdTask?.cancel()
+            holdTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 160_000_000)
+                if isHoldGestureActive && !showFlywheel {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                        showFlywheel = true
+                    }
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                }
+            }
+        }
+
+        // If user drags > 12pt, spawn immediately without waiting for timer
+        if distance > 12 && !showFlywheel {
+            holdTask?.cancel()
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                showFlywheel = true
+            }
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        }
+
+        // Update hovered preset as user drags outward
+        if showFlywheel {
+            let center = FlywheelView.clampedCenter(
+                spawnPosition: flywheelSpawnPoint ?? value.startLocation,
+                in: UIScreen.main.bounds.size
+            )
+            if let preset = LookPreset.preset(at: value.location, relativeTo: center) {
+                if flywheelHoveredPreset != preset {
+                    flywheelHoveredPreset = preset
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                }
+            }
+        }
+    }
+
+    private func handlePhotoDragEnded(value: DragGesture.Value) {
+        holdTask?.cancel()
+        isHoldGestureActive = false
+
+        if showFlywheel {
+            if let selected = flywheelHoveredPreset {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                    camera.activePreset = selected
+                    showFlywheel = false
+                }
+                UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+            } else {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    showFlywheel = false
+                }
             }
         }
     }

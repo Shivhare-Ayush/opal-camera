@@ -12,6 +12,10 @@ public struct CameraViewfinder: View {
     @StateObject private var albumManager = AlbumManager.shared
     @State private var currentMode: OpalMode = .camera
     @State private var showFlywheel: Bool = false
+    @State private var flywheelSpawnPoint: CGPoint? = nil
+    @State private var flywheelHoveredPreset: LookPreset? = nil
+    @State private var holdTask: Task<Void, Never>? = nil
+    @State private var isHoldGestureActive: Bool = false
     @State private var currentFrame: CIImage?
     @State private var showingCleanupAlert: Bool = false
     @State private var cleanupResultMessage: String = ""
@@ -100,17 +104,21 @@ public struct CameraViewfinder: View {
                     PhotoGradingView(
                         camera: camera,
                         albumManager: albumManager,
-                        showFlywheel: $showFlywheel
+                        showFlywheel: $showFlywheel,
+                        flywheelSpawnPoint: $flywheelSpawnPoint,
+                        flywheelHoveredPreset: $flywheelHoveredPreset
                     )
                     .transition(.opacity)
                 }
             }
 
-            // Radial Flywheel Layer (Overlaid when Island is active in either mode)
+            // Radial Flywheel Layer (Overlaid dynamically when triggered in either mode)
             if showFlywheel {
                 FlywheelView(
                     activePreset: $camera.activePreset,
-                    isPresented: $showFlywheel
+                    isPresented: $showFlywheel,
+                    spawnPosition: flywheelSpawnPoint,
+                    hoveredPreset: $flywheelHoveredPreset
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.85)))
                 .zIndex(10)
@@ -159,21 +167,14 @@ public struct CameraViewfinder: View {
                                 .stroke(Color.white.opacity(0.15), lineWidth: 1)
                         )
                 }
-                // Dedicated horizontal swipe on the viewfinder surface only (never blocks controls)
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 35)
+                // Hold-and-drag to spawn Flywheel anywhere on camera viewfinder
+                .gesture(
+                    DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                        .onChanged { value in
+                            handleViewportDragChanged(value: value)
+                        }
                         .onEnded { value in
-                            if value.translation.width > 50 {
-                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                    currentMode = .library
-                                }
-                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                            } else if value.translation.width < -50 {
-                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                    currentMode = .library
-                                }
-                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                            }
+                            handleViewportDragEnded(value: value)
                         }
                 )
             }
@@ -184,6 +185,8 @@ public struct CameraViewfinder: View {
                 // Look Switcher Pill (Clear, generous, centered tap target)
                 Button(action: {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                        flywheelSpawnPoint = nil
+                        flywheelHoveredPreset = camera.activePreset
                         showFlywheel.toggle()
                     }
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -270,6 +273,72 @@ public struct CameraViewfinder: View {
                 }
                 .padding(.horizontal, 28)
                 .padding(.bottom, 22)
+            }
+        }
+    }
+
+    // MARK: - Hold-and-Drag Flywheel Gestures
+
+    private func handleViewportDragChanged(value: DragGesture.Value) {
+        let distance = hypot(value.translation.width, value.translation.height)
+
+        if !isHoldGestureActive {
+            isHoldGestureActive = true
+            flywheelSpawnPoint = value.startLocation
+            flywheelHoveredPreset = camera.activePreset
+
+            // 160ms hold timer for static finger press
+            holdTask?.cancel()
+            holdTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 160_000_000)
+                if isHoldGestureActive && !showFlywheel {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                        showFlywheel = true
+                    }
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                }
+            }
+        }
+
+        // If user drags > 12pt, spawn immediately without waiting for timer
+        if distance > 12 && !showFlywheel {
+            holdTask?.cancel()
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                showFlywheel = true
+            }
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        }
+
+        // Update hovered preset as user drags outward
+        if showFlywheel {
+            let center = FlywheelView.clampedCenter(
+                spawnPosition: flywheelSpawnPoint ?? value.startLocation,
+                in: UIScreen.main.bounds.size
+            )
+            if let preset = LookPreset.preset(at: value.location, relativeTo: center) {
+                if flywheelHoveredPreset != preset {
+                    flywheelHoveredPreset = preset
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                }
+            }
+        }
+    }
+
+    private func handleViewportDragEnded(value: DragGesture.Value) {
+        holdTask?.cancel()
+        isHoldGestureActive = false
+
+        if showFlywheel {
+            if let selected = flywheelHoveredPreset {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                    camera.activePreset = selected
+                    showFlywheel = false
+                }
+                UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+            } else {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    showFlywheel = false
+                }
             }
         }
     }
