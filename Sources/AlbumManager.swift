@@ -2,9 +2,9 @@ import Photos
 import UIKit
 
 @MainActor
-final class AlbumManager: ObservableObject {
-    static let shared = AlbumManager()
-    @Published var authorizationStatus: PHAuthorizationStatus = .notDetermined
+public final class AlbumManager: ObservableObject {
+    public static let shared = AlbumManager()
+    @Published public var authorizationStatus: PHAuthorizationStatus = .notDetermined
 
     private init() {}
 

@@ -3,7 +3,7 @@ import PhotosUI
 import Photos
 import CoreImage
 
-public struct PhotoGradingView: View {
+struct PhotoGradingView: View {
     @ObservedObject var camera: CameraSessionManager
     @ObservedObject var albumManager: AlbumManager
     @Binding var showFlywheel: Bool
@@ -16,7 +16,7 @@ public struct PhotoGradingView: View {
     @State private var showSaveSuccess: Bool = false
     @State private var saveSuccessMessage: String = ""
 
-    public init(camera: CameraSessionManager, albumManager: AlbumManager, showFlywheel: Binding<Bool>) {
+    init(camera: CameraSessionManager, albumManager: AlbumManager, showFlywheel: Binding<Bool>) {
         self.camera = camera
         self.albumManager = albumManager
         self._showFlywheel = showFlywheel
