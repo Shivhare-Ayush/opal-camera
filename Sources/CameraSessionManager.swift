@@ -3,8 +3,7 @@ import CoreImage
 import SwiftUI
 import MetalKit
 
-@MainActor
-public final class CameraSessionManager: NSObject, ObservableObject {
+public final class CameraSessionManager: NSObject, ObservableObject, @unchecked Sendable {
     public static let shared = CameraSessionManager()
 
     // Published State
@@ -22,7 +21,7 @@ public final class CameraSessionManager: NSObject, ObservableObject {
     // Concurrency Synchronization
     private let stateLock = NSLock()
     private var _safePreset: LookPreset = .cleanPunch
-    public nonisolated var currentSafePreset: LookPreset {
+    public var currentSafePreset: LookPreset {
         stateLock.lock()
         defer { stateLock.unlock() }
         return _safePreset
@@ -48,8 +47,9 @@ public final class CameraSessionManager: NSObject, ObservableObject {
     private func setupMetal() {
         if let device = MTLCreateSystemDefaultDevice() {
             self.metalDevice = device
+            let colorSpace = CGColorSpace(name: CGColorSpace.extendedSRGB) ?? CGColorSpaceCreateDeviceRGB()
             self.ciContext = CIContext(mtlDevice: device, options: [
-                .workingColorSpace: CGColorSpace(name: CGColorSpace.extendedSRGB)!,
+                .workingColorSpace: colorSpace,
                 .cacheIntermediates: false
             ])
         } else {
@@ -133,7 +133,7 @@ public final class CameraSessionManager: NSObject, ObservableObject {
 // MARK: - AVCaptureVideoDataOutputSampleBufferDelegate
 
 extension CameraSessionManager: AVCaptureVideoDataOutputSampleBufferDelegate {
-    public nonisolated func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+    public func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
         let inputImage = CIImage(cvPixelBuffer: pixelBuffer)
@@ -151,7 +151,7 @@ extension CameraSessionManager: AVCaptureVideoDataOutputSampleBufferDelegate {
 // MARK: - AVCapturePhotoCaptureDelegate
 
 extension CameraSessionManager: AVCapturePhotoCaptureDelegate {
-    public nonisolated func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+    public func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         defer {
             DispatchQueue.main.async {
                 self.isCapturing = false
@@ -186,12 +186,14 @@ extension CameraSessionManager: AVCapturePhotoCaptureDelegate {
 
         let gradedUIImage = UIImage(cgImage: gradedCGImage, scale: sourceImage.scale, orientation: sourceImage.imageOrientation)
 
-        // Save to dedicated "LiveGraded Photos" album
-        AlbumManager.shared.save(gradedImage: gradedUIImage, rawData: photoData) { [weak self] result in
-            DispatchQueue.main.async {
-                if case .success = result {
-                    self?.lastCapturedThumbnail = gradedUIImage
-                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+        // Save to dedicated "LiveGraded Photos" album on MainActor
+        Task { @MainActor in
+            AlbumManager.shared.save(gradedImage: gradedUIImage, rawData: photoData) { [weak self] result in
+                DispatchQueue.main.async {
+                    if case .success = result {
+                        self?.lastCapturedThumbnail = gradedUIImage
+                        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                    }
                 }
             }
         }

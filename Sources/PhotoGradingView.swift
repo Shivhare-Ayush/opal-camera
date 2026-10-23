@@ -339,7 +339,8 @@ struct PhotoGradingView: View {
                 fullData = await self.fetchFullAssetData(for: asset)
             }
 
-            guard let dataToProcess = fullData ?? (await self.previewImage?.jpegData(compressionQuality: 0.95)),
+            let fallbackData = await self.previewImage?.jpegData(compressionQuality: 0.95)
+            guard let dataToProcess = fullData ?? fallbackData,
                   let fullImage = UIImage(data: dataToProcess),
                   let ciInput = CIImage(image: fullImage) else {
                 await MainActor.run { self.isSaving = false }
