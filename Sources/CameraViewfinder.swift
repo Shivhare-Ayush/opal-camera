@@ -2,9 +2,15 @@ import SwiftUI
 import MetalKit
 import CoreImage
 
+public enum OpalMode: String, CaseIterable {
+    case camera = "CAMERA"
+    case library = "LIBRARY"
+}
+
 public struct CameraViewfinder: View {
     @StateObject private var camera = CameraSessionManager.shared
     @StateObject private var albumManager = AlbumManager.shared
+    @State private var currentMode: OpalMode = .camera
     @State private var showFlywheel: Bool = false
     @State private var currentFrame: CIImage?
     @State private var showingCleanupAlert: Bool = false
@@ -16,14 +22,60 @@ public struct CameraViewfinder: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            // 1. Live Graded 60fps Metal Viewfinder (90% Screen)
             VStack(spacing: 0) {
-                // Top Minimal Status Bar
+                // Top Header (Brand + Mode Pill Switcher + Test Cleanup)
                 HStack {
                     Text("OPAL")
                         .font(.system(size: 11, weight: .black))
                         .tracking(3)
                         .foregroundColor(.white.opacity(0.85))
+
+                    Spacer()
+
+                    // Mode Toggle Capsule
+                    HStack(spacing: 2) {
+                        Button(action: {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                currentMode = .camera
+                            }
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "camera.fill")
+                                    .font(.system(size: 10))
+                                Text("CAM")
+                                    .font(.system(size: 10, weight: .bold))
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(currentMode == .camera ? Color.white.opacity(0.25) : Color.clear)
+                            .foregroundColor(.white)
+                            .clipShape(Capsule())
+                        }
+
+                        Button(action: {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                currentMode = .library
+                            }
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "photo.stack.fill")
+                                    .font(.system(size: 10))
+                                Text("PHOTOS")
+                                    .font(.system(size: 10, weight: .bold))
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(currentMode == .library ? Color.white.opacity(0.25) : Color.clear)
+                            .foregroundColor(.white)
+                            .clipShape(Capsule())
+                        }
+                    }
+                    .padding(2)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(Color.white.opacity(0.15), lineWidth: 1))
 
                     Spacer()
 
@@ -38,97 +90,37 @@ public struct CameraViewfinder: View {
                 .padding(.top, 12)
                 .padding(.bottom, 8)
 
-                // The Viewfinder
-                GeometryReader { geo in
-                    ZStack {
-                        MetalViewRepresentable(image: currentFrame)
-                            .frame(width: geo.size.width, height: geo.size.height)
-                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                    .stroke(Color.white.opacity(0.15), lineWidth: 1)
-                            )
-                    }
-                }
-                .padding(.horizontal, 10)
-
-                // 2. Bottom Control Deck (Floating Island + Shutter)
-                ZStack {
-                    HStack {
-                        // Thumbnail Preview
-                        if let thumb = camera.lastCapturedThumbnail {
-                            Image(uiImage: thumb)
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(width: 48, height: 48)
-                                .clipShape(Circle())
-                                .overlay(Circle().stroke(Color.white, lineWidth: 2))
-                        } else {
-                            Circle()
-                                .fill(Color.white.opacity(0.1))
-                                .frame(width: 48, height: 48)
-                        }
-
-                        Spacer()
-
-                        // Shutter Button
-                        Button(action: {
-                            camera.capturePhoto()
-                        }) {
-                            ZStack {
-                                Circle()
-                                    .stroke(Color.white, lineWidth: 4)
-                                    .frame(width: 72, height: 72)
-                                Circle()
-                                    .fill(Color.white)
-                                    .frame(width: 60, height: 60)
-                            }
-                        }
-                        .disabled(camera.isCapturing)
-
-                        Spacer()
-
-                        // Empty anchor to balance HStack
-                        Color.clear.frame(width: 48, height: 48)
-                    }
-                    .padding(.horizontal, 28)
-                    .padding(.bottom, 24)
-                    .padding(.top, 14)
-
-                    // Floating Island (Above Shutter)
-                    VStack {
-                        Button(action: {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                                showFlywheel.toggle()
-                            }
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        }) {
-                            HStack(spacing: 8) {
-                                Circle()
-                                    .fill(camera.activePreset.accentColor)
-                                    .frame(width: 8, height: 8)
-
-                                Text(camera.activePreset.displayName)
-                                    .font(.system(size: 13, weight: .bold))
-                                    .foregroundColor(.white)
-
-                                Image(systemName: "chevron.up.circle.fill")
-                                    .font(.system(size: 13))
-                                    .foregroundColor(.white.opacity(0.6))
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(.ultraThinMaterial)
-                            .clipShape(Capsule())
-                            .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1))
-                            .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
-                        }
-                        .offset(y: -54)
-                    }
+                // Main Content Body (Camera Viewfinder vs Photo Library Grading)
+                if currentMode == .camera {
+                    cameraViewportView
+                } else {
+                    PhotoGradingView(
+                        camera: camera,
+                        albumManager: albumManager,
+                        showFlywheel: $showFlywheel
+                    )
+                    .transition(.opacity)
                 }
             }
+            // Swipe right or left outside camera area to switch modes
+            .gesture(
+                DragGesture(minimumDistance: 45)
+                    .onEnded { value in
+                        if value.translation.width > 60 {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                currentMode = (currentMode == .camera) ? .library : .camera
+                            }
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        } else if value.translation.width < -60 {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                currentMode = (currentMode == .camera) ? .library : .camera
+                            }
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        }
+                    }
+            )
 
-            // 3. Radial Flywheel Layer (Overlaid when Island is active)
+            // Radial Flywheel Layer (Overlaid when Island is active in either mode)
             if showFlywheel {
                 FlywheelView(
                     activePreset: $camera.activePreset,
@@ -162,6 +154,113 @@ public struct CameraViewfinder: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This will wipe only photos saved in the 'LiveGraded Photos' album for quick testing resets.")
+        }
+    }
+
+    // MARK: - Camera Viewport & Controls Subview
+
+    private var cameraViewportView: some View {
+        VStack(spacing: 0) {
+            // Live Graded 60fps Metal Viewfinder (90% Screen)
+            GeometryReader { geo in
+                ZStack {
+                    MetalViewRepresentable(image: currentFrame)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                        )
+                }
+            }
+            .padding(.horizontal, 10)
+
+            // Bottom Control Deck (Thumbnail/Library Link + Floating Island + Shutter)
+            ZStack {
+                HStack {
+                    // Thumbnail Preview (Tapping jumps directly to Library mode)
+                    Button(action: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                            currentMode = .library
+                        }
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }) {
+                        if let thumb = camera.lastCapturedThumbnail {
+                            Image(uiImage: thumb)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: 48, height: 48)
+                                .clipShape(Circle())
+                                .overlay(Circle().stroke(Color.white, lineWidth: 2))
+                        } else {
+                            Circle()
+                                .fill(Color.white.opacity(0.1))
+                                .frame(width: 48, height: 48)
+                                .overlay(
+                                    Image(systemName: "photo.stack")
+                                        .font(.system(size: 18))
+                                        .foregroundColor(.white.opacity(0.6))
+                                )
+                        }
+                    }
+
+                    Spacer()
+
+                    // Shutter Button
+                    Button(action: {
+                        camera.capturePhoto()
+                    }) {
+                        ZStack {
+                            Circle()
+                                .stroke(Color.white, lineWidth: 4)
+                                .frame(width: 72, height: 72)
+                            Circle()
+                                .fill(Color.white)
+                                .frame(width: 60, height: 60)
+                        }
+                    }
+                    .disabled(camera.isCapturing)
+
+                    Spacer()
+
+                    // Empty anchor to balance HStack
+                    Color.clear.frame(width: 48, height: 48)
+                }
+                .padding(.horizontal, 28)
+                .padding(.bottom, 24)
+                .padding(.top, 14)
+
+                // Floating Island (Above Shutter)
+                VStack {
+                    Button(action: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                            showFlywheel.toggle()
+                        }
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }) {
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(camera.activePreset.accentColor)
+                                .frame(width: 8, height: 8)
+
+                            Text(camera.activePreset.displayName)
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(.white)
+
+                            Image(systemName: "chevron.up.circle.fill")
+                                .font(.system(size: 13))
+                                .foregroundColor(.white.opacity(0.6))
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1))
+                        .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
+                    }
+                    .offset(y: -54)
+                }
+            }
         }
     }
 }
