@@ -9,7 +9,8 @@ public struct FlywheelView: View {
     // Flywheel Geometry
     private let wedgeCount = 6
     private let innerRadius: CGFloat = 45
-    public static let outerRadius: CGFloat = 135
+    private let outerRadius: CGFloat = 135
+    public static let defaultOuterRadius: CGFloat = 135
 
     @State private var internalHoveredPreset: LookPreset?
     @State private var lastHapticIndex: Int = -1
@@ -29,7 +30,7 @@ public struct FlywheelView: View {
     }
 
     /// Computes clamped center so the 135pt radial wheel never clips screen edges.
-    public static func clampedCenter(spawnPosition: CGPoint?, in size: CGSize) -> CGPoint {
+    public static func clampedCenter(spawnPosition: CGPoint?, in size: CGSize, outerRadius: CGFloat = defaultOuterRadius) -> CGPoint {
         let defaultCenter = CGPoint(x: size.width / 2, y: size.height / 2)
         let rawCenter = spawnPosition ?? defaultCenter
         let clampedX = min(max(rawCenter.x, outerRadius + 16), size.width - outerRadius - 16)
