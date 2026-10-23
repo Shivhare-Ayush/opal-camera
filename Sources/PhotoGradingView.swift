@@ -2,6 +2,7 @@ import SwiftUI
 import PhotosUI
 import Photos
 import CoreImage
+import ImageIO
 
 struct PhotoGradingView: View {
     @ObservedObject var camera: CameraSessionManager
@@ -9,12 +10,15 @@ struct PhotoGradingView: View {
     @Binding var showFlywheel: Bool
 
     @State private var selectedItem: PhotosPickerItem?
-    @State private var originalImage: UIImage?
-    @State private var gradedImage: UIImage?
+    @State private var previewImage: UIImage?
+    @State private var originalFullData: Data?
+    @State private var currentAsset: PHAsset?
+    @State private var gradedPreviewImage: UIImage?
     @State private var isComparingOriginal: Bool = false
     @State private var isSaving: Bool = false
     @State private var showSaveSuccess: Bool = false
     @State private var saveSuccessMessage: String = ""
+    @State private var gradingTask: Task<Void, Never>?
 
     init(camera: CameraSessionManager, albumManager: AlbumManager, showFlywheel: Binding<Bool>) {
         self.camera = camera
@@ -22,12 +26,12 @@ struct PhotoGradingView: View {
         self._showFlywheel = showFlywheel
     }
 
-    public var body: some View {
+    var body: some View {
         VStack(spacing: 0) {
             // Main Canvas Area (90% Screen)
             GeometryReader { geo in
                 ZStack {
-                    if let imageToDisplay = isComparingOriginal ? originalImage : (gradedImage ?? originalImage) {
+                    if let imageToDisplay = isComparingOriginal ? previewImage : (gradedPreviewImage ?? previewImage) {
                         Image(uiImage: imageToDisplay)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
@@ -41,7 +45,7 @@ struct PhotoGradingView: View {
                             .gesture(
                                 DragGesture(minimumDistance: 0)
                                     .onChanged { _ in
-                                        if !isComparingOriginal && originalImage != nil {
+                                        if !isComparingOriginal && previewImage != nil {
                                             isComparingOriginal = true
                                             UIImpactFeedbackGenerator(style: .light).impactOccurred()
                                         }
@@ -80,7 +84,7 @@ struct PhotoGradingView: View {
                             Spacer()
 
                             // Hint: Press & Hold to peek original
-                            if originalImage != nil && !isComparingOriginal {
+                            if previewImage != nil && !isComparingOriginal {
                                 Text("Hold photo to compare original")
                                     .font(.system(size: 12, weight: .medium))
                                     .foregroundColor(.white.opacity(0.6))
@@ -91,6 +95,7 @@ struct PhotoGradingView: View {
                                     .padding(.bottom, 12)
                             }
                         }
+                        .allowsHitTesting(false)
                     } else {
                         // Empty State: Prompt to select a photo
                         VStack(spacing: 16) {
@@ -151,6 +156,7 @@ struct PhotoGradingView: View {
                             .padding(.bottom, 20)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
+                        .allowsHitTesting(false)
                     }
                 }
             }
@@ -163,13 +169,16 @@ struct PhotoGradingView: View {
                     PhotosPicker(selection: $selectedItem, matching: .images) {
                         ZStack {
                             Circle()
-                                .fill(Color.white.opacity(0.12))
+                                .fill(Color.white.opacity(0.15))
                                 .frame(width: 48, height: 48)
                             Image(systemName: "photo.stack")
                                 .font(.system(size: 20))
                                 .foregroundColor(.white)
                         }
+                        .frame(width: 48, height: 48)
+                        .contentShape(Circle())
                     }
+                    .buttonStyle(.plain)
 
                     Spacer()
 
@@ -193,9 +202,12 @@ struct PhotoGradingView: View {
                                     .foregroundColor(.white)
                             }
                         }
+                        .frame(width: 68, height: 68)
+                        .contentShape(Circle())
                     }
-                    .disabled(originalImage == nil || isSaving)
-                    .opacity(originalImage == nil ? 0.3 : 1.0)
+                    .buttonStyle(.plain)
+                    .disabled(previewImage == nil || isSaving)
+                    .opacity(previewImage == nil ? 0.3 : 1.0)
 
                     Spacer()
 
@@ -233,9 +245,26 @@ struct PhotoGradingView: View {
                         .clipShape(Capsule())
                         .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1))
                         .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
+                        .contentShape(Capsule())
                     }
+                    .buttonStyle(.plain)
                     .offset(y: -54)
                 }
+                .allowsHitTesting(false) // Container does not block clicks underneath
+                .overlay(
+                    // Interactive trigger sits strictly within capsule bounds
+                    Button(action: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                            showFlywheel.toggle()
+                        }
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }) {
+                        Capsule().fill(Color.clear)
+                            .frame(width: 160, height: 36)
+                    }
+                    .buttonStyle(.plain)
+                    .offset(y: -54)
+                )
             }
         }
         .onAppear {
@@ -243,74 +272,147 @@ struct PhotoGradingView: View {
         }
         .onChange(of: selectedItem) { newItem in
             Task {
-                if let data = try? await newItem?.loadTransferable(type: Data.self),
-                   let image = UIImage(data: data) {
-                    await MainActor.run {
-                        self.originalImage = image
-                        self.applyGrade(to: image, preset: camera.activePreset)
+                guard let data = try? await newItem?.loadTransferable(type: Data.self) else { return }
+
+                // Decode-time downsample to max 1920 to eliminate peak RAM spikes
+                let downsampled = downsample(data: data, maxDimension: 1920)
+
+                await MainActor.run {
+                    self.currentAsset = nil
+                    self.originalFullData = data
+                    self.previewImage = downsampled
+                    if let downsampled = downsampled {
+                        self.applyGrade(to: downsampled, preset: camera.activePreset)
                     }
                 }
             }
         }
         .onChange(of: camera.activePreset) { newPreset in
-            if let image = originalImage {
+            if let image = previewImage {
                 applyGrade(to: image, preset: newPreset)
             }
         }
     }
 
-    // MARK: - Grading Logic
+    // MARK: - Thread-Safe Asynchronous Grading with Task Cancellation
 
     private func applyGrade(to image: UIImage, preset: LookPreset) {
-        guard let ciInput = CIImage(image: image) else { return }
-        let filter = LUTPresets.shared.filter(for: preset)
-        filter.setValue(ciInput, forKey: kCIInputImageKey)
+        gradingTask?.cancel()
 
-        guard let outputCI = filter.outputImage else { return }
-        let context = camera.ciContext ?? CIContext(options: nil)
+        gradingTask = Task.detached(priority: .userInitiated) {
+            guard !Task.isCancelled else { return }
+            guard let ciInput = CIImage(image: image) else { return }
 
-        if let cgImage = context.createCGImage(outputCI, from: outputCI.extent) {
-            self.gradedImage = UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
+            let outputCI = LUTPresets.shared.applyGrade(to: ciInput, preset: preset)
+
+            guard !Task.isCancelled else { return }
+
+            let colorSpace = CGColorSpace(name: CGColorSpace.extendedSRGB) ?? CGColorSpaceCreateDeviceRGB()
+            let context = CIContext(options: [
+                .workingColorSpace: colorSpace,
+                .cacheIntermediates: false
+            ])
+
+            guard let cgImage = context.createCGImage(outputCI, from: outputCI.extent) else { return }
+            guard !Task.isCancelled else { return }
+
+            let graded = UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
+
+            await MainActor.run {
+                guard !Task.isCancelled else { return }
+                self.gradedPreviewImage = graded
+            }
         }
     }
 
+    // MARK: - Full Resolution Export
+
     private func saveGradedPhoto() {
-        guard let graded = gradedImage, let original = originalImage else { return }
         isSaving = true
+        let preset = camera.activePreset
 
-        let rawData = original.jpegData(compressionQuality: 0.95)
+        Task.detached(priority: .userInitiated) {
+            var fullData: Data? = await self.originalFullData
 
-        albumManager.save(gradedImage: graded, rawData: rawData) { result in
-            DispatchQueue.main.async {
-                self.isSaving = false
-                switch result {
-                case .success:
-                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-                    self.saveSuccessMessage = "Saved to 'LiveGraded Photos'"
-                    withAnimation { self.showSaveSuccess = true }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                        withAnimation { self.showSaveSuccess = false }
+            // If photo was auto-loaded from latest library asset, fetch original full data
+            if fullData == nil, let asset = await self.currentAsset {
+                fullData = await self.fetchFullAssetData(for: asset)
+            }
+
+            guard let dataToProcess = fullData ?? (await self.previewImage?.jpegData(compressionQuality: 0.95)),
+                  let fullImage = UIImage(data: dataToProcess),
+                  let ciInput = CIImage(image: fullImage) else {
+                await MainActor.run { self.isSaving = false }
+                return
+            }
+
+            let outputCI = LUTPresets.shared.applyGrade(to: ciInput, preset: preset)
+            let context = CIContext(options: nil)
+
+            guard let cgImage = context.createCGImage(outputCI, from: outputCI.extent) else {
+                await MainActor.run { self.isSaving = false }
+                return
+            }
+
+            let fullGradedImage = UIImage(cgImage: cgImage, scale: fullImage.scale, orientation: fullImage.imageOrientation)
+
+            await MainActor.run {
+                self.albumManager.save(gradedImage: fullGradedImage, rawData: dataToProcess) { result in
+                    DispatchQueue.main.async {
+                        self.isSaving = false
+                        switch result {
+                        case .success:
+                            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                            self.saveSuccessMessage = "Saved to 'LiveGraded Photos'"
+                            withAnimation { self.showSaveSuccess = true }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                                withAnimation { self.showSaveSuccess = false }
+                            }
+                        case .failure(let error):
+                            self.saveSuccessMessage = "Failed: \(error.localizedDescription)"
+                            withAnimation { self.showSaveSuccess = true }
+                        }
                     }
-                case .failure(let error):
-                    self.saveSuccessMessage = "Failed: \(error.localizedDescription)"
-                    withAnimation { self.showSaveSuccess = true }
                 }
             }
         }
     }
 
+    // MARK: - Decode-Time Memory Downsampler (ImageIO)
+
+    private func downsample(data: Data, maxDimension: CGFloat) -> UIImage? {
+        let options: [CFString: Any] = [
+            kCGImageSourceShouldCache: false
+        ]
+        guard let imageSource = CGImageSourceCreateWithData(data as CFData, options as CFDictionary) else {
+            return UIImage(data: data)
+        }
+
+        let downsampleOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxDimension
+        ]
+        guard let downsampledImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, downsampleOptions as CFDictionary) else {
+            return UIImage(data: data)
+        }
+        return UIImage(cgImage: downsampledImage)
+    }
+
     // MARK: - Auto-load Latest Library Photo
 
     private func loadLatestLibraryPhotoIfAvailable() {
-        guard originalImage == nil else { return }
+        guard previewImage == nil else { return }
 
-        // Fetch most recent photo
         let fetchOptions = PHFetchOptions()
         fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         fetchOptions.fetchLimit = 1
 
         let fetchResult = PHAsset.fetchAssets(with: .image, options: fetchOptions)
         guard let latestAsset = fetchResult.firstObject else { return }
+
+        self.currentAsset = latestAsset
 
         let manager = PHImageManager.default()
         let requestOptions = PHImageRequestOptions()
@@ -321,9 +423,22 @@ struct PhotoGradingView: View {
         manager.requestImage(for: latestAsset, targetSize: CGSize(width: 1440, height: 1920), contentMode: .aspectFit, options: requestOptions) { image, _ in
             if let image = image {
                 DispatchQueue.main.async {
-                    self.originalImage = image
+                    self.previewImage = image
                     self.applyGrade(to: image, preset: self.camera.activePreset)
                 }
+            }
+        }
+    }
+
+    private func fetchFullAssetData(for asset: PHAsset) async -> Data? {
+        await withCheckedContinuation { continuation in
+            let options = PHImageRequestOptions()
+            options.isSynchronous = false
+            options.deliveryMode = .highQualityFormat
+            options.isNetworkAccessAllowed = true
+
+            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, _ in
+                continuation.resume(returning: data)
             }
         }
     }

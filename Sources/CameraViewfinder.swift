@@ -52,6 +52,7 @@ public struct CameraViewfinder: View {
                             .foregroundColor(.white)
                             .clipShape(Capsule())
                         }
+                        .buttonStyle(.plain)
 
                         Button(action: {
                             withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
@@ -71,6 +72,7 @@ public struct CameraViewfinder: View {
                             .foregroundColor(.white)
                             .clipShape(Capsule())
                         }
+                        .buttonStyle(.plain)
                     }
                     .padding(2)
                     .background(.ultraThinMaterial)
@@ -85,6 +87,7 @@ public struct CameraViewfinder: View {
                             .font(.system(size: 20))
                             .foregroundColor(.white.opacity(0.7))
                     }
+                    .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 12)
@@ -102,23 +105,6 @@ public struct CameraViewfinder: View {
                     .transition(.opacity)
                 }
             }
-            // Swipe right or left outside camera area to switch modes
-            .gesture(
-                DragGesture(minimumDistance: 45)
-                    .onEnded { value in
-                        if value.translation.width > 60 {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                currentMode = (currentMode == .camera) ? .library : .camera
-                            }
-                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        } else if value.translation.width < -60 {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                currentMode = (currentMode == .camera) ? .library : .camera
-                            }
-                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        }
-                    }
-            )
 
             // Radial Flywheel Layer (Overlaid when Island is active in either mode)
             if showFlywheel {
@@ -127,6 +113,7 @@ public struct CameraViewfinder: View {
                     isPresented: $showFlywheel
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.85)))
+                .zIndex(10)
             }
         }
         .onAppear {
@@ -172,37 +159,59 @@ public struct CameraViewfinder: View {
                                 .stroke(Color.white.opacity(0.15), lineWidth: 1)
                         )
                 }
+                // Dedicated horizontal swipe on the viewfinder surface only (never blocks controls)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 35)
+                        .onEnded { value in
+                            if value.translation.width > 50 {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                    currentMode = .library
+                                }
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            } else if value.translation.width < -50 {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                    currentMode = .library
+                                }
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            }
+                        }
+                )
             }
             .padding(.horizontal, 10)
 
-            // Bottom Control Deck (Thumbnail/Library Link + Floating Island + Shutter)
+            // Bottom Control Deck (Thumbnail/Inspect Button + Floating Island + Shutter)
             ZStack {
                 HStack {
-                    // Thumbnail Preview (Tapping jumps directly to Library mode)
+                    // Bottom-Left Inspect / Library Button
                     Button(action: {
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                             currentMode = .library
                         }
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     }) {
-                        if let thumb = camera.lastCapturedThumbnail {
-                            Image(uiImage: thumb)
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(width: 48, height: 48)
-                                .clipShape(Circle())
-                                .overlay(Circle().stroke(Color.white, lineWidth: 2))
-                        } else {
-                            Circle()
-                                .fill(Color.white.opacity(0.1))
-                                .frame(width: 48, height: 48)
-                                .overlay(
-                                    Image(systemName: "photo.stack")
-                                        .font(.system(size: 18))
-                                        .foregroundColor(.white.opacity(0.6))
-                                )
+                        ZStack {
+                            if let thumb = camera.lastCapturedThumbnail {
+                                Image(uiImage: thumb)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                                    .frame(width: 48, height: 48)
+                                    .clipShape(Circle())
+                                    .overlay(Circle().stroke(Color.white, lineWidth: 2))
+                            } else {
+                                Circle()
+                                    .fill(Color.white.opacity(0.15))
+                                    .frame(width: 48, height: 48)
+                                    .overlay(
+                                        Image(systemName: "photo.stack")
+                                            .font(.system(size: 20))
+                                            .foregroundColor(.white)
+                                    )
+                            }
                         }
+                        .frame(width: 48, height: 48)
+                        .contentShape(Circle())
                     }
+                    .buttonStyle(.plain)
 
                     Spacer()
 
@@ -218,7 +227,9 @@ public struct CameraViewfinder: View {
                                 .fill(Color.white)
                                 .frame(width: 60, height: 60)
                         }
+                        .contentShape(Circle())
                     }
+                    .buttonStyle(.plain)
                     .disabled(camera.isCapturing)
 
                     Spacer()
@@ -230,7 +241,7 @@ public struct CameraViewfinder: View {
                 .padding(.bottom, 24)
                 .padding(.top, 14)
 
-                // Floating Island (Above Shutter)
+                // Floating Island (Above Shutter - hit testing strictly bounded to pill)
                 VStack {
                     Button(action: {
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
@@ -257,9 +268,25 @@ public struct CameraViewfinder: View {
                         .clipShape(Capsule())
                         .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1))
                         .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
+                        .contentShape(Capsule())
                     }
+                    .buttonStyle(.plain)
                     .offset(y: -54)
                 }
+                .allowsHitTesting(false)
+                .overlay(
+                    Button(action: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                            showFlywheel.toggle()
+                        }
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }) {
+                        Capsule().fill(Color.clear)
+                            .frame(width: 160, height: 36)
+                    }
+                    .buttonStyle(.plain)
+                    .offset(y: -54)
+                )
             }
         }
     }

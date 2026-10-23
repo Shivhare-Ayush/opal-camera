@@ -9,16 +9,16 @@ final class LiveGradedLooksTests: XCTestCase {
         XCTAssertEqual(LookPreset.cleanPunch.rawValue, 0, "Clean Punch must be case 0 (Default Launch - Option A)")
     }
 
-    func testFilterPrebakeGeneratesValidData() {
+    func testCubeDataPrebakeGeneratesValidData() {
         let presets = LUTPresets.shared
         for preset in LookPreset.allCases {
-            let filter = presets.filter(for: preset)
-            XCTAssertNotNil(filter, "Filter for \(preset.displayName) must exist")
-            XCTAssertEqual(filter.name, "CIColorCube")
-            let data = filter.value(forKey: "inputCubeData") as? Data
-            XCTAssertNotNil(data, "Cube data for \(preset.displayName) must not be nil")
+            let data = presets.cubeData(for: preset)
+            XCTAssertFalse(data.isEmpty, "Cube data for \(preset.displayName) must not be empty")
             let expectedSize = 32 * 32 * 32 * 4 * MemoryLayout<Float>.size
-            XCTAssertEqual(data?.count, expectedSize, "Cube data size must match 32x32x32 RGBA float buffer")
+            XCTAssertEqual(data.count, expectedSize, "Cube data size must match 32x32x32 RGBA float buffer")
+
+            let filter = presets.createFreshFilter(for: preset)
+            XCTAssertNotNil(filter, "Fresh filter for \(preset.displayName) must instantiate")
         }
     }
 
@@ -30,5 +30,11 @@ final class LiveGradedLooksTests: XCTestCase {
     func testRahilFilmicSignatureLookExists() {
         XCTAssertEqual(LookPreset.rahilFilmic.displayName, "Rahil Filmic")
         XCTAssertEqual(LookPreset.rahilFilmic.subtitle, "35mm Analog Warmth")
+    }
+
+    func testPortra400DayPrebakesSafelyWithoutCrash() {
+        let presets = LUTPresets.shared
+        let data = presets.cubeData(for: .portra400Day)
+        XCTAssertFalse(data.isEmpty, "Portra 400 cube data must prebake without error")
     }
 }

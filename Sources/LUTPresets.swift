@@ -4,7 +4,7 @@ import SwiftUI
 
 // MARK: - Look Preset Identifiers
 
-public enum LookPreset: Int, CaseIterable, Identifiable {
+public enum LookPreset: Int, CaseIterable, Identifiable, Sendable {
     case cleanPunch = 0       // Default Launch Look (Option A)
     case rahilFilmic = 1      // Signature 35mm film emulation
     case goldenHourSkyline = 2 // Warm sunset glow + enhanced sky
@@ -48,41 +48,57 @@ public enum LookPreset: Int, CaseIterable, Identifiable {
     }
 }
 
-// MARK: - 3D Color Cube Filter Cache & Generator
+// MARK: - Thread-Safe 3D Color Cube Filter Cache & Generator
 
-public final class LUTPresets {
+public final class LUTPresets: @unchecked Sendable {
     public static let shared = LUTPresets()
 
     public static let cubeDimension: Int = 32
-    private var prebakedFilters: [LookPreset: CIFilter] = [:]
+    private var prebakedCubeData: [LookPreset: Data] = [:]
+    private let lock = NSLock()
 
     private init() {
-        prebakeFilters()
+        prebakeCubes()
     }
 
-    /// Pre-bakes all 6 CIFilters at launch so flywheel drag has zero GPU buffer allocation latency.
-    public func prebakeFilters() {
+    /// Pre-bakes all 6 immutable 3D cube data buffers at launch.
+    /// Eliminates runtime allocation latency while ensuring 100% thread safety.
+    public func prebakeCubes() {
+        lock.lock()
+        defer { lock.unlock() }
         for preset in LookPreset.allCases {
-            let cubeData = Self.createColorCubeData(for: preset, dimension: Self.cubeDimension)
-            if let filter = CIFilter(name: "CIColorCube") {
-                filter.setValue(Self.cubeDimension, forKey: "inputCubeDimension")
-                filter.setValue(cubeData, forKey: "inputCubeData")
-                prebakedFilters[preset] = filter
-            }
+            let data = Self.createColorCubeData(for: preset, dimension: Self.cubeDimension)
+            prebakedCubeData[preset] = data
         }
     }
 
-    /// Fast, non-blocking lookup of pre-baked CIColorCube filter.
-    public func filter(for preset: LookPreset) -> CIFilter {
-        if let existing = prebakedFilters[preset] {
-            return existing
+    /// Returns the pre-baked immutable cube data for a preset.
+    public func cubeData(for preset: LookPreset) -> Data {
+        lock.lock()
+        defer { lock.unlock() }
+        if let data = prebakedCubeData[preset] {
+            return data
         }
-        // Fallback prebake if accessed before cache
-        let cubeData = Self.createColorCubeData(for: preset, dimension: Self.cubeDimension)
-        let filter = CIFilter(name: "CIColorCube")!
+        let freshData = Self.createColorCubeData(for: preset, dimension: Self.cubeDimension)
+        prebakedCubeData[preset] = freshData
+        return freshData
+    }
+
+    /// Thread-safe pure functional grading. Creates no shared mutable state.
+    public func applyGrade(to image: CIImage, preset: LookPreset) -> CIImage {
+        let data = cubeData(for: preset)
+        return image.applyingFilter("CIColorCube", parameters: [
+            "inputCubeDimension": Self.cubeDimension,
+            "inputCubeData": data
+        ])
+    }
+
+    /// Creates a dedicated, isolated CIFilter instance per caller when explicit filter object is needed.
+    public func createFreshFilter(for preset: LookPreset) -> CIFilter? {
+        let data = cubeData(for: preset)
+        guard let filter = CIFilter(name: "CIColorCube") else { return nil }
         filter.setValue(Self.cubeDimension, forKey: "inputCubeDimension")
-        filter.setValue(cubeData, forKey: "inputCubeData")
-        prebakedFilters[preset] = filter
+        filter.setValue(data, forKey: "inputCubeData")
         return filter
     }
 
@@ -90,17 +106,18 @@ public final class LUTPresets {
 
     /// Procedurally builds 3D color cube data for CIColorCube adhering to "Natural Skin with Richer Scenery".
     public static func createColorCubeData(for preset: LookPreset, dimension: Int = 32) -> Data {
-        let size = dimension * dimension * dimension * 4
+        let dim = max(2, min(dimension, 64)) // Bounded dimension safeguard
+        let size = dim * dim * dim * 4
         var cube = [Float](repeating: 0, count: size)
         var offset = 0
 
-        let invDim = 1.0 / Float(dimension - 1)
+        let invDim = 1.0 / Float(dim - 1)
 
-        for bIndex in 0..<dimension {
+        for bIndex in 0..<dim {
             let b = Float(bIndex) * invDim
-            for gIndex in 0..<dimension {
+            for gIndex in 0..<dim {
                 let g = Float(gIndex) * invDim
-                for rIndex in 0..<dimension {
+                for rIndex in 0..<dim {
                     let r = Float(rIndex) * invDim
 
                     // Transform (r, g, b) according to preset color science
@@ -137,7 +154,6 @@ public final class LUTPresets {
             let rC = (r - 0.5) * contrast + 0.5
             let gC = (g - 0.5) * contrast + 0.5
             let bC = (b - 0.5) * contrast + 0.5
-            // Subtle cyan boost in highlights
             let cyanBoost: Float = lum > 0.6 ? 0.04 : 0.0
             nr = mix(rC, r, skinWeight)
             ng = mix(gC + (cyanBoost * 0.5), g, skinWeight)
@@ -148,7 +164,6 @@ public final class LUTPresets {
             let liftedR = r * 0.92 + 0.04
             let liftedG = g * 0.92 + 0.035
             let liftedB = b * 0.90 + 0.05 // subtle cool shadow lift
-            // Muted cyan/greens, warm highlight roll-off
             let warmHighlight: Float = lum > 0.7 ? 0.03 : 0.0
             nr = mix(liftedR + warmHighlight, r * 0.96 + 0.02, skinWeight)
             ng = mix(liftedG, g * 0.96 + 0.02, skinWeight)

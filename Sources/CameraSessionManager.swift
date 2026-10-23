@@ -8,21 +8,36 @@ public final class CameraSessionManager: NSObject, ObservableObject {
     public static let shared = CameraSessionManager()
 
     // Published State
-    @Published public var activePreset: LookPreset = .cleanPunch // Default Option A
+    @Published public var activePreset: LookPreset = .cleanPunch {
+        didSet {
+            stateLock.lock()
+            _safePreset = activePreset
+            stateLock.unlock()
+        }
+    }
     @Published public var isSessionRunning: Bool = false
     @Published public var isCapturing: Bool = false
     @Published public var lastCapturedThumbnail: UIImage?
+
+    // Concurrency Synchronization
+    private let stateLock = NSLock()
+    private var _safePreset: LookPreset = .cleanPunch
+    public nonisolated var currentSafePreset: LookPreset {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return _safePreset
+    }
 
     // AVFoundation Session
     public let captureSession = AVCaptureSession()
     private let videoOutput = AVCaptureVideoDataOutput()
     private let photoOutput = AVCapturePhotoOutput()
     private let sessionQueue = DispatchQueue(label: "livegraded.camera.sessionQueue")
+    private var isConfigured = false
 
     // Metal & Core Image Rendering
     public var metalDevice: MTLDevice?
     public var ciContext: CIContext?
-    public var currentDrawablePixelBuffer: CVPixelBuffer?
     public var onFrameProcessed: ((CIImage) -> Void)?
 
     private override init() {
@@ -58,7 +73,9 @@ public final class CameraSessionManager: NSObject, ObservableObject {
 
     public func configureSession() {
         sessionQueue.async { [weak self] in
-            guard let self = self else { return }
+            guard let self = self, !self.isConfigured else { return }
+            self.isConfigured = true
+
             self.captureSession.beginConfiguration()
             self.captureSession.sessionPreset = .photo
 
@@ -79,6 +96,10 @@ public final class CameraSessionManager: NSObject, ObservableObject {
                 ]
                 self.videoOutput.setSampleBufferDelegate(self, queue: DispatchQueue(label: "livegraded.camera.videoQueue", qos: .userInteractive))
                 self.captureSession.addOutput(self.videoOutput)
+
+                if let connection = self.videoOutput.connection(with: .video), connection.isVideoOrientationSupported {
+                    connection.videoOrientation = .portrait
+                }
             }
 
             // Setup Photo Capture Output
@@ -112,24 +133,17 @@ public final class CameraSessionManager: NSObject, ObservableObject {
 // MARK: - AVCaptureVideoDataOutputSampleBufferDelegate
 
 extension CameraSessionManager: AVCaptureVideoDataOutputSampleBufferDelegate {
-    public func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+    public nonisolated func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-
-        // Orientation Fix
-        if connection.isVideoOrientationSupported {
-            connection.videoOrientation = .portrait
-        }
 
         let inputImage = CIImage(cvPixelBuffer: pixelBuffer)
 
-        // Apply pre-baked active CIColorCube LUT
-        let filter = LUTPresets.shared.filter(for: activePreset)
-        filter.setValue(inputImage, forKey: kCIInputImageKey)
+        // Thread-safe immutable 3D LUT grading (Zero shared mutable state)
+        let preset = currentSafePreset
+        let outputImage = LUTPresets.shared.applyGrade(to: inputImage, preset: preset)
 
-        if let outputImage = filter.outputImage {
-            DispatchQueue.main.async { [weak self] in
-                self?.onFrameProcessed?(outputImage)
-            }
+        DispatchQueue.main.async { [weak self] in
+            self?.onFrameProcessed?(outputImage)
         }
     }
 }
@@ -137,7 +151,7 @@ extension CameraSessionManager: AVCaptureVideoDataOutputSampleBufferDelegate {
 // MARK: - AVCapturePhotoCaptureDelegate
 
 extension CameraSessionManager: AVCapturePhotoCaptureDelegate {
-    public func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+    public nonisolated func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         defer {
             DispatchQueue.main.async {
                 self.isCapturing = false
@@ -154,7 +168,6 @@ extension CameraSessionManager: AVCapturePhotoCaptureDelegate {
             return
         }
 
-        // Maintain orientation and color space
         let ciInput: CIImage
         if let cgImage = sourceImage.cgImage {
             ciInput = CIImage(cgImage: cgImage)
@@ -164,10 +177,9 @@ extension CameraSessionManager: AVCapturePhotoCaptureDelegate {
             return
         }
 
-        let filter = LUTPresets.shared.filter(for: activePreset)
-        filter.setValue(ciInput, forKey: kCIInputImageKey)
-
-        guard let outputCI = filter.outputImage else { return }
+        // Apply thread-safe immutable 3D LUT
+        let preset = currentSafePreset
+        let outputCI = LUTPresets.shared.applyGrade(to: ciInput, preset: preset)
 
         let context = ciContext ?? CIContext(options: nil)
         guard let gradedCGImage = context.createCGImage(outputCI, from: outputCI.extent) else { return }
