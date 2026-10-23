@@ -11,17 +11,17 @@ final class AlbumManager: ObservableObject {
     // MARK: - Authorization
 
     func checkAuthorization() async {
-        let status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         authorizationStatus = status
     }
 
-    func requestAddOnlyPermission() async {
-        let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+    func requestAuthorization() async {
+        let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
         authorizationStatus = status
     }
 
     private func ensureAuthorization() async throws {
-        let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
         authorizationStatus = status
         guard status == .authorized || status == .limited else {
             throw NSError(domain: "AlbumManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "Photo library access denied or limited"])
@@ -65,22 +65,24 @@ final class AlbumManager: ObservableObject {
         Task { @MainActor in
             do {
                 try await ensureAuthorization()
-                let collection = try await fetchOrCreateLiveGradedCollection()
-
-                let gradedChangeRequest = PHAssetChangeRequest.creationRequestForAsset(from: gradedImage)
-                guard let gradedPlaceholder = gradedChangeRequest.placeholderForCreatedAsset else {
-                    completion(.failure(NSError(domain: "AlbumManager", code: -4, userInfo: [NSLocalizedDescriptionKey: "Failed to create graded asset"])))
-                    return
-                }
+                let collection = try? await fetchOrCreateLiveGradedCollection()
 
                 PHPhotoLibrary.shared().performChanges({
-                    let collectionChangeRequest = PHAssetCollectionChangeRequest(for: collection)
-                    collectionChangeRequest?.addAssets([gradedPlaceholder] as NSArray)
+                    let gradedChangeRequest = PHAssetChangeRequest.creationRequestForAsset(from: gradedImage)
+                    guard let gradedPlaceholder = gradedChangeRequest.placeholderForCreatedAsset else { return }
+
+                    if let collection = collection,
+                       let collectionChangeRequest = PHAssetCollectionChangeRequest(for: collection) {
+                        collectionChangeRequest.addAssets([gradedPlaceholder] as NSArray)
+                    }
 
                     if let rawData = rawData, let rawImage = UIImage(data: rawData) {
                         let rawChangeRequest = PHAssetChangeRequest.creationRequestForAsset(from: rawImage)
-                        guard let rawPlaceholder = rawChangeRequest.placeholderForCreatedAsset else { return }
-                        collectionChangeRequest?.addAssets([rawPlaceholder] as NSArray)
+                        if let rawPlaceholder = rawChangeRequest.placeholderForCreatedAsset,
+                           let collection = collection,
+                           let collectionChangeRequest = PHAssetCollectionChangeRequest(for: collection) {
+                            collectionChangeRequest.addAssets([rawPlaceholder] as NSArray)
+                        }
                     }
                 }) { saved, error in
                     if let error = error {

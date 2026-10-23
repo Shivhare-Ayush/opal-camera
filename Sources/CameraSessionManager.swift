@@ -31,12 +31,15 @@ public final class CameraSessionManager: NSObject, ObservableObject {
     }
 
     private func setupMetal() {
-        guard let device = MTLCreateSystemDefaultDevice() else { return }
-        self.metalDevice = device
-        self.ciContext = CIContext(mtlDevice: device, options: [
-            .workingColorSpace: CGColorSpace(name: CGColorSpace.extendedSRGB)!,
-            .cacheIntermediates: false
-        ])
+        if let device = MTLCreateSystemDefaultDevice() {
+            self.metalDevice = device
+            self.ciContext = CIContext(mtlDevice: device, options: [
+                .workingColorSpace: CGColorSpace(name: CGColorSpace.extendedSRGB)!,
+                .cacheIntermediates: false
+            ])
+        } else {
+            self.ciContext = CIContext(options: nil)
+        }
     }
 
     // MARK: - Session Configuration
@@ -80,7 +83,6 @@ public final class CameraSessionManager: NSObject, ObservableObject {
 
             // Setup Photo Capture Output
             if self.captureSession.canAddOutput(self.photoOutput) {
-                self.photoOutput.isHighResolutionCaptureEnabled = true
                 self.photoOutput.maxPhotoQualityPrioritization = .balanced
                 self.captureSession.addOutput(self.photoOutput)
             }
@@ -100,8 +102,7 @@ public final class CameraSessionManager: NSObject, ObservableObject {
         guard !isCapturing else { return }
         isCapturing = true
 
-        let settings = AVCapturePhotoSettings(format: [kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)])
-        settings.isHighResolutionPhotoEnabled = true
+        let settings = AVCapturePhotoSettings()
         settings.photoQualityPrioritization = .balanced
 
         photoOutput.capturePhoto(with: settings, delegate: self)
@@ -143,20 +144,38 @@ extension CameraSessionManager: AVCapturePhotoCaptureDelegate {
             }
         }
 
-        guard error == nil, let pixelBuffer = photo.pixelBuffer else { return }
+        if let error = error {
+            print("Photo capture error: \(error.localizedDescription)")
+            return
+        }
 
-        let rawImage = CIImage(cvPixelBuffer: pixelBuffer)
+        guard let photoData = photo.fileDataRepresentation(),
+              let sourceImage = UIImage(data: photoData) else {
+            return
+        }
+
+        // Maintain orientation and color space
+        let ciInput: CIImage
+        if let cgImage = sourceImage.cgImage {
+            ciInput = CIImage(cgImage: cgImage)
+        } else if let ci = CIImage(data: photoData) {
+            ciInput = ci
+        } else {
+            return
+        }
+
         let filter = LUTPresets.shared.filter(for: activePreset)
-        filter.setValue(rawImage, forKey: kCIInputImageKey)
+        filter.setValue(ciInput, forKey: kCIInputImageKey)
 
-        guard let outputCI = filter.outputImage,
-              let cgImage = ciContext?.createCGImage(outputCI, from: outputCI.extent) else { return }
+        guard let outputCI = filter.outputImage else { return }
 
-        let gradedUIImage = UIImage(cgImage: cgImage)
-        let rawData = photo.fileDataRepresentation()
+        let context = ciContext ?? CIContext(options: nil)
+        guard let gradedCGImage = context.createCGImage(outputCI, from: outputCI.extent) else { return }
+
+        let gradedUIImage = UIImage(cgImage: gradedCGImage, scale: sourceImage.scale, orientation: sourceImage.imageOrientation)
 
         // Save to dedicated "LiveGraded Photos" album
-        AlbumManager.shared.save(gradedImage: gradedUIImage, rawData: rawData) { [weak self] result in
+        AlbumManager.shared.save(gradedImage: gradedUIImage, rawData: photoData) { [weak self] result in
             DispatchQueue.main.async {
                 if case .success = result {
                     self?.lastCapturedThumbnail = gradedUIImage
