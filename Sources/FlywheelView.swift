@@ -48,6 +48,11 @@ public struct FlywheelView: View {
                                 .lineLimit(1)
                         }
                     )
+                    .onTapGesture {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            isPresented = false
+                        }
+                    }
 
                 // 6 Radial Wedges
                 ForEach(LookPreset.allCases) { preset in
@@ -60,7 +65,7 @@ public struct FlywheelView: View {
                     .fill(
                         isHovered(preset)
                             ? preset.accentColor.opacity(0.85)
-                            : (preset == activePreset ? preset.accentColor.opacity(0.4) : Color.white.opacity(0.15))
+                            : (preset == activePreset ? preset.accentColor.opacity(0.4) : Color.white.opacity(0.18))
                     )
                     .overlay(
                         WedgeShape(
@@ -69,7 +74,7 @@ public struct FlywheelView: View {
                             innerRadius: innerRadius,
                             outerRadius: isHovered(preset) ? outerRadius + 12 : outerRadius
                         )
-                        .stroke(Color.white.opacity(isHovered(preset) ? 0.9 : 0.2), lineWidth: 1.5)
+                        .stroke(Color.white.opacity(isHovered(preset) ? 0.9 : 0.25), lineWidth: 1.5)
                     )
                     .overlay(
                         WedgeLabel(
@@ -79,11 +84,18 @@ public struct FlywheelView: View {
                             radius: (innerRadius + outerRadius) / 2
                         )
                     )
+                    .onTapGesture {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                            activePreset = preset
+                            isPresented = false
+                        }
+                        UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+                    }
                 }
             }
             .frame(width: outerRadius * 2.4, height: outerRadius * 2.4)
             .gesture(
-                DragGesture(minimumDistance: 0)
+                DragGesture(minimumDistance: 10)
                     .onChanged { value in
                         handleDrag(location: value.location)
                     }
@@ -112,9 +124,12 @@ public struct FlywheelView: View {
         var angle = atan2(dy, dx) * 180 / .pi
         if angle < 0 { angle += 360 }
 
-        // 6 Wedges: 60 degrees each. Offset by 30 degrees to center top wedge
+        // 6 Wedges: 60 degrees each.
+        // In screen coordinates: North is 270 degrees.
+        // Adding 90 degrees rotates coordinates so North (270°) maps to 0° (Clean Punch).
         let sliceAngle: Double = 360.0 / Double(wedgeCount)
-        let adjustedAngle = (angle + (sliceAngle / 2)).truncatingRemainder(dividingBy: 360)
+        let normalizedAngle = (angle + 90.0).truncatingRemainder(dividingBy: 360.0)
+        let adjustedAngle = (normalizedAngle + (sliceAngle / 2.0)).truncatingRemainder(dividingBy: 360.0)
         let index = Int(adjustedAngle / sliceAngle) % wedgeCount
 
         if let newPreset = LookPreset(rawValue: index) {

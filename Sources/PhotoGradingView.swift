@@ -162,20 +162,51 @@ struct PhotoGradingView: View {
             }
             .padding(.horizontal, 10)
 
-            // Bottom Control Deck (Picker + Flywheel Island + Save Button)
-            ZStack {
+            // Bottom Control Deck (Look Switcher Pill above, Action Row below)
+            VStack(spacing: 14) {
+                // Look Switcher Pill (Clear, generous, centered tap target)
+                Button(action: {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                        showFlywheel.toggle()
+                    }
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                }) {
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(camera.activePreset.accentColor)
+                            .frame(width: 9, height: 9)
+
+                        Text(camera.activePreset.displayName)
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white)
+
+                        Image(systemName: "chevron.up.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 10)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1.5))
+                    .shadow(color: .black.opacity(0.4), radius: 8, y: 4)
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+
+                // Action Row: Photos Picker | Save Button | Balance Spacer
                 HStack {
                     // Photos Picker Trigger
                     PhotosPicker(selection: $selectedItem, matching: .images) {
                         ZStack {
                             Circle()
-                                .fill(Color.white.opacity(0.15))
-                                .frame(width: 48, height: 48)
+                                .fill(Color.white.opacity(0.18))
+                                .frame(width: 52, height: 52)
                             Image(systemName: "photo.stack")
                                 .font(.system(size: 20))
                                 .foregroundColor(.white)
                         }
-                        .frame(width: 48, height: 48)
+                        .frame(width: 52, height: 52)
                         .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
@@ -212,59 +243,10 @@ struct PhotoGradingView: View {
                     Spacer()
 
                     // Empty placeholder to balance layout
-                    Color.clear.frame(width: 48, height: 48)
+                    Color.clear.frame(width: 52, height: 52)
                 }
                 .padding(.horizontal, 28)
-                .padding(.bottom, 24)
-                .padding(.top, 14)
-
-                // Floating Island (Flywheel Opener)
-                VStack {
-                    Button(action: {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                            showFlywheel.toggle()
-                        }
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    }) {
-                        HStack(spacing: 8) {
-                            Circle()
-                                .fill(camera.activePreset.accentColor)
-                                .frame(width: 8, height: 8)
-
-                            Text(camera.activePreset.displayName)
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundColor(.white)
-
-                            Image(systemName: "chevron.up.circle.fill")
-                                .font(.system(size: 13))
-                                .foregroundColor(.white.opacity(0.6))
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1))
-                        .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
-                        .contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .offset(y: -54)
-                }
-                .allowsHitTesting(false) // Container does not block clicks underneath
-                .overlay(
-                    // Interactive trigger sits strictly within capsule bounds
-                    Button(action: {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                            showFlywheel.toggle()
-                        }
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    }) {
-                        Capsule().fill(Color.clear)
-                            .frame(width: 160, height: 36)
-                    }
-                    .buttonStyle(.plain)
-                    .offset(y: -54)
-                )
+                .padding(.bottom, 22)
             }
         }
         .onAppear {

@@ -179,8 +179,39 @@ public struct CameraViewfinder: View {
             }
             .padding(.horizontal, 10)
 
-            // Bottom Control Deck (Thumbnail/Inspect Button + Floating Island + Shutter)
-            ZStack {
+            // Bottom Control Deck (Look Switcher Pill above, Controls Row below)
+            VStack(spacing: 14) {
+                // Look Switcher Pill (Clear, generous, centered tap target)
+                Button(action: {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                        showFlywheel.toggle()
+                    }
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                }) {
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(camera.activePreset.accentColor)
+                            .frame(width: 9, height: 9)
+
+                        Text(camera.activePreset.displayName)
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white)
+
+                        Image(systemName: "chevron.up.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 10)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1.5))
+                    .shadow(color: .black.opacity(0.4), radius: 8, y: 4)
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+
+                // Main Shutter & Inspect Row
                 HStack {
                     // Bottom-Left Inspect / Library Button
                     Button(action: {
@@ -194,13 +225,13 @@ public struct CameraViewfinder: View {
                                 Image(uiImage: thumb)
                                     .resizable()
                                     .aspectRatio(contentMode: .fill)
-                                    .frame(width: 48, height: 48)
+                                    .frame(width: 52, height: 52)
                                     .clipShape(Circle())
                                     .overlay(Circle().stroke(Color.white, lineWidth: 2))
                             } else {
                                 Circle()
-                                    .fill(Color.white.opacity(0.15))
-                                    .frame(width: 48, height: 48)
+                                    .fill(Color.white.opacity(0.18))
+                                    .frame(width: 52, height: 52)
                                     .overlay(
                                         Image(systemName: "photo.stack")
                                             .font(.system(size: 20))
@@ -208,7 +239,7 @@ public struct CameraViewfinder: View {
                                     )
                             }
                         }
-                        .frame(width: 48, height: 48)
+                        .frame(width: 52, height: 52)
                         .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
@@ -222,10 +253,10 @@ public struct CameraViewfinder: View {
                         ZStack {
                             Circle()
                                 .stroke(Color.white, lineWidth: 4)
-                                .frame(width: 72, height: 72)
+                                .frame(width: 74, height: 74)
                             Circle()
                                 .fill(Color.white)
-                                .frame(width: 60, height: 60)
+                                .frame(width: 62, height: 62)
                         }
                         .contentShape(Circle())
                     }
@@ -235,58 +266,10 @@ public struct CameraViewfinder: View {
                     Spacer()
 
                     // Empty anchor to balance HStack
-                    Color.clear.frame(width: 48, height: 48)
+                    Color.clear.frame(width: 52, height: 52)
                 }
                 .padding(.horizontal, 28)
-                .padding(.bottom, 24)
-                .padding(.top, 14)
-
-                // Floating Island (Above Shutter - hit testing strictly bounded to pill)
-                VStack {
-                    Button(action: {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                            showFlywheel.toggle()
-                        }
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    }) {
-                        HStack(spacing: 8) {
-                            Circle()
-                                .fill(camera.activePreset.accentColor)
-                                .frame(width: 8, height: 8)
-
-                            Text(camera.activePreset.displayName)
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundColor(.white)
-
-                            Image(systemName: "chevron.up.circle.fill")
-                                .font(.system(size: 13))
-                                .foregroundColor(.white.opacity(0.6))
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1))
-                        .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
-                        .contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .offset(y: -54)
-                }
-                .allowsHitTesting(false)
-                .overlay(
-                    Button(action: {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                            showFlywheel.toggle()
-                        }
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    }) {
-                        Capsule().fill(Color.clear)
-                            .frame(width: 160, height: 36)
-                    }
-                    .buttonStyle(.plain)
-                    .offset(y: -54)
-                )
+                .padding(.bottom, 22)
             }
         }
     }
