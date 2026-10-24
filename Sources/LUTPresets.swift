@@ -155,79 +155,184 @@ public final class LUTPresets: @unchecked Sendable {
         return Data(bytes: cube, count: size * MemoryLayout<Float>.size)
     }
 
-    // MARK: - Preset Math Transformations
+    // MARK: - Preset Math Transformations (Empirical Social Archetypes & Codex Compliant)
+
+    private static func quinticSmoothstep(_ t: Float) -> Float {
+        let tc = min(max(t, 0.0), 1.0)
+        return tc * tc * tc * (tc * (tc * 6.0 - 15.0) + 10.0)
+    }
+
+    private static func c2TonalCurve(_ v: Float, lMin: Float, lMax: Float) -> Float {
+        return lMin + (lMax - lMin) * quinticSmoothstep(v)
+    }
+
+    private static func rgbToHsv(r: Float, g: Float, b: Float) -> (h: Float, s: Float, v: Float) {
+        let cmax = max(r, max(g, b))
+        let cmin = min(r, min(g, b))
+        let delta = cmax - cmin
+
+        var h: Float = 0.0
+        if delta > 1e-7 {
+            if cmax == r {
+                h = 60.0 * (((g - b) / delta).truncatingRemainder(dividingBy: 6.0))
+            } else if cmax == g {
+                h = 60.0 * (((b - r) / delta) + 2.0)
+            } else {
+                h = 60.0 * (((r - g) / delta) + 4.0)
+            }
+            if h < 0.0 { h += 360.0 }
+        }
+
+        let s = cmax > 1e-7 ? delta / cmax : 0.0
+        let v = cmax
+        return (h, s, v)
+    }
+
+    private static func hsvToRgb(h: Float, s: Float, v: Float) -> (r: Float, g: Float, b: Float) {
+        let normH = (h.truncatingRemainder(dividingBy: 360.0) + 360.0).truncatingRemainder(dividingBy: 360.0)
+        let clampedS = min(max(s, 0.0), 1.0)
+        let clampedV = min(max(v, 0.0), 1.0)
+
+        let c = clampedV * clampedS
+        let x = c * (1.0 - abs(((normH / 60.0).truncatingRemainder(dividingBy: 2.0)) - 1.0))
+        let m = clampedV - c
+
+        let sector = Int(normH / 60.0) % 6
+        var (rr, gg, bb): (Float, Float, Float) = (0, 0, 0)
+        switch sector {
+        case 0: (rr, gg, bb) = (c, x, 0)
+        case 1: (rr, gg, bb) = (x, c, 0)
+        case 2: (rr, gg, bb) = (0, c, x)
+        case 3: (rr, gg, bb) = (0, x, c)
+        case 4: (rr, gg, bb) = (x, 0, c)
+        default: (rr, gg, bb) = (c, 0, x)
+        }
+        return (clamp(rr + m), clamp(gg + m), clamp(bb + m))
+    }
+
+    private static func computeMelaninWeight(h: Float, lum: Float) -> Float {
+        let hCenter: Float = 27.5
+        let hRadius: Float = 17.5
+        let hDist = abs(h - hCenter)
+        let wHue: Float = hDist < hRadius ? pow(cos((Float.pi / 2.0) * (hDist / hRadius)), 2) : 0.0
+
+        var wLum: Float = 0.0
+        if lum >= 0.2 && lum <= 0.8 {
+            wLum = 1.0
+        } else if lum >= 0.05 && lum < 0.2 {
+            wLum = pow(sin((Float.pi / 2.0) * ((lum - 0.05) / 0.15)), 2)
+        } else if lum > 0.8 && lum <= 0.95 {
+            wLum = pow(cos((Float.pi / 2.0) * ((lum - 0.8) / 0.15)), 2)
+        }
+        return wHue * wLum
+    }
 
     private static func gradePixel(r: Float, g: Float, b: Float, preset: LookPreset) -> (Float, Float, Float) {
         // Luminance calculation (Rec. 709)
         let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
 
-        // Skin Tone Sanctuary: Check if color lies within melanin hue angle corridor (orange-yellow, r > g > b)
-        let isSkinTone = (r > g) && (g > b) && ((r - b) > 0.1) && (r < 0.95)
-        let skinWeight: Float = isSkinTone ? 0.85 : 0.0 // 85% protection if skin
+        // 1. Convert to HSV
+        let (h, s, v) = rgbToHsv(r: r, g: g, b: b)
 
-        var (nr, ng, nb) = (r, g, b)
+        // 2. Melanin Sanctuary Weight (Fitzpatrick I-VI midtone corridor)
+        let wSkin = computeMelaninWeight(h: h, lum: lum)
+
+        var lMin: Float = 0.0
+        var lMax: Float = 1.0
+        var envRotations: [(low: Float, high: Float, delta: Float)] = []
+        var satBg: Float = 0.0
+        var satSkinCap: Float = 0.04
+        var hltWarmthDrb: Float = 0.0
+        var shdWarmthDrb: Float = 0.0
 
         switch preset {
         case .cleanPunch:
-            // S-curve contrast + 10% micro-contrast boost on background, skin protected
-            let contrast: Float = 1.10
-            let rC = (r - 0.5) * contrast + 0.5
-            let gC = (g - 0.5) * contrast + 0.5
-            let bC = (b - 0.5) * contrast + 0.5
-            let cyanBoost: Float = lum > 0.6 ? 0.04 : 0.0
-            nr = mix(rC, r, skinWeight)
-            ng = mix(gC + (cyanBoost * 0.5), g, skinWeight)
-            nb = mix(bC + cyanBoost, b, skinWeight)
+            // Daytime City: Deep cobalt polarized sky (-10°), crisp contrast
+            lMin = 0.050; lMax = 0.960
+            envRotations = [(190.0, 240.0, -10.0)]
+            satBg = 0.15; satSkinCap = 0.04
 
         case .rahilFilmic:
-            // 35mm Analog: lifted matte black (0.04), soft analog highlight knee, muted midtone saturation
-            let liftedR = r * 0.92 + 0.04
-            let liftedG = g * 0.92 + 0.035
-            let liftedB = b * 0.90 + 0.05 // subtle cool shadow lift
-            let warmHighlight: Float = lum > 0.7 ? 0.03 : 0.0
-            nr = mix(liftedR + warmHighlight, r * 0.96 + 0.02, skinWeight)
-            ng = mix(liftedG, g * 0.96 + 0.02, skinWeight)
-            nb = mix(liftedB, b * 0.95, skinWeight)
+            // Street & Flash Editorial: Lifted matte black floor, soft highlight shoulder, Kodak daylight warmth
+            lMin = 0.133; lMax = 0.925
+            satBg = 0.08; satSkinCap = 0.03
+            hltWarmthDrb = 0.165
+            shdWarmthDrb = 0.060
 
         case .goldenHourSkyline:
-            // Warm +5° hue shift in midtones, sky saturation +25%, shadow lift +15%
-            let warmR = r * 1.15 + (lum * 0.05)
-            let warmG = g * 1.05
-            let skyB = b > 0.4 ? (b * 1.25) : (b * 0.95) // enhance sky, warm ground
-            let shadowLift: Float = lum < 0.3 ? 0.06 : 0.0
-            nr = mix(warmR + shadowLift, r * 1.03, skinWeight) // skin stays natural
-            ng = mix(warmG + shadowLift, g, skinWeight)
-            nb = mix(skyB + (shadowLift * 0.5), b, skinWeight)
-
-        case .moodyEditorial:
-            // Low-key architectural contrast, deepened cyans, lifted blacks
-            let darkR = (r - 0.5) * 1.20 + 0.5
-            let darkG = (g - 0.5) * 1.15 + 0.5
-            let darkB = (b - 0.5) * 1.25 + 0.5 + 0.04 // deep cyan shadows
-            nr = mix(darkR, r, skinWeight)
-            ng = mix(darkG, g, skinWeight)
-            nb = mix(darkB, b, skinWeight)
-
-        case .portra400Day:
-            // Kodak Portra characteristic curves: warm organic skin, earthy foliage, soft knee
-            let pR = r * 1.06 + (lum > 0.5 ? 0.02 : 0.0)
-            let pG = g * 1.02
-            let pB = b * 0.96
-            nr = mix(pR, r * 1.02, skinWeight)
-            ng = mix(pG, g * 1.01, skinWeight)
-            nb = mix(pB, b * 0.99, skinWeight)
+            // Sunset / Rooftop: Specular sunset warmth, melanin saturation locked (+4% max)
+            lMin = 0.070; lMax = 0.949
+            envRotations = [(20.0, 60.0, 12.0)]
+            satBg = 0.18; satSkinCap = 0.04
+            hltWarmthDrb = 0.180
 
         case .midnightCity:
-            // Neon night: boosted teal/magenta ambient curves, shadows +20%, strict skin isolation
-            let neonR = (r > 0.5) ? (r * 1.2) : (r * 0.9)
-            let neonG = g * 0.95
-            let neonB = (b < 0.5) ? (b * 1.30) : (b * 1.15) // strong teal in shadows
-            nr = mix(neonR, r, skinWeight)
-            ng = mix(neonG, g, skinWeight)
-            nb = mix(neonB, b, skinWeight)
+            // Night City Neon: Sodium lamps shifted toward amber (-13°), cool indigo shadows
+            lMin = 0.086; lMax = 0.960
+            envRotations = [(50.0, 75.0, -13.0)]
+            satBg = 0.15; satSkinCap = 0.02
+            shdWarmthDrb = -0.080
+
+        case .portra400Day:
+            // Nature & Foliage: Digital green -> olive/sage (-15°), aquatic cyan deepening
+            lMin = 0.078; lMax = 0.972
+            envRotations = [(105.0, 145.0, -15.0), (175.0, 205.0, -8.0)]
+            satBg = 0.12; satSkinCap = 0.04
+            hltWarmthDrb = 0.080
+
+        case .moodyEditorial:
+            // Indoor Cafe & Dining: Clean white tableware anchor, cozy ambient shadow warmth
+            lMin = 0.070; lMax = 0.941
+            envRotations = [(35.0, 65.0, 6.0)]
+            satBg = 0.10; satSkinCap = 0.03
+            shdWarmthDrb = 0.050
         }
 
-        return (nr, ng, nb)
+        // 3. Tonal curve applied to V (C2 continuous quintic Hermite)
+        let vNew = c2TonalCurve(v, lMin: lMin, lMax: lMax)
+
+        // 4. Environmental Hue Rotations with zero skin hue shift
+        var hNew = h
+        for rot in envRotations {
+            let center = (rot.low + rot.high) / 2.0
+            let halfWidth = (rot.high - rot.low) / 2.0
+            let directDist = abs(h - center)
+            let circDist = min(directDist, 360.0 - directDist)
+            if circDist < halfWidth {
+                let mask = pow(cos((Float.pi / 2.0) * (circDist / halfWidth)), 2)
+                let effectiveWeight = mask * (1.0 - wSkin)
+                hNew = (hNew + effectiveWeight * rot.delta).truncatingRemainder(dividingBy: 360.0)
+                if hNew < 0 { hNew += 360.0 }
+            }
+        }
+
+        // 5. Selective Saturation Modulation
+        let effectiveSatBoost = (1.0 - wSkin) * satBg + wSkin * satSkinCap
+        let sNew = min(max(s * (1.0 + effectiveSatBoost), 0.0), 1.0)
+
+        // 6. Convert back to RGB
+        var (outR, outG, outB) = hsvToRgb(h: hNew, s: sNew, v: vNew)
+
+        // 7. Luminance-Neutral Chrominance Split-Toning (Rec. 709)
+        if hltWarmthDrb != 0.0 {
+            let hltIn = min(max((lum - 0.55) / 0.45, 0.0), 1.0)
+            let hltWeight = quinticSmoothstep(hltIn) * (1.0 - v)
+            let dr = hltWeight * (hltWarmthDrb * 0.35)
+            let dg = -0.1963087 * dr
+            let db = -dr
+            outR += dr; outG += dg; outB += db
+        }
+
+        if shdWarmthDrb != 0.0 {
+            let shdIn = min(max((0.45 - lum) / 0.45, 0.0), 1.0)
+            let shdWeight = quinticSmoothstep(shdIn) * v
+            let dr = shdWeight * (shdWarmthDrb * 0.35)
+            let dg = -0.1963087 * dr
+            let db = -dr
+            outR += dr; outG += dg; outB += db
+        }
+
+        return (clamp(outR), clamp(outG), clamp(outB))
     }
 
     private static func mix(_ a: Float, _ b: Float, _ t: Float) -> Float {
